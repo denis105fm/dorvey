@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Dorvey",
+  "version": "1.0.0",
+  "description": "Dorvey admin quick actions",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["http://localhost:8000/*", "https://*/*"],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

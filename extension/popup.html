@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 320px; padding: 12px; font-family: system-ui; background: #0f172a; color: #e2e8f0; }
+    h2 { margin: 0 0 12px; font-size: 14px; color: #10b981; }
+    input { width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #475569; border-radius: 6px; background: #1e293b; color: #fff; box-sizing: border-box; }
+    button { width: 100%; padding: 8px; background: #10b981; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button:hover { background: #059669; }
+    .status { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h2>Dorvey</h2>
+  <input type="password" id="token" placeholder="API Token (JWT)" />
+  <input type="text" id="apiUrl" placeholder="API URL (e.g. https://app.dorvey.com)" value="http://localhost:8000" />
+  <button id="save">Save</button>
+  <div class="status" id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
