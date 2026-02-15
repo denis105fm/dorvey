@@ -2,11 +2,11 @@
 
 ## Docker (рекомендуется)
 
-Запуск всего стека одной командой:
-
 ```bash
 docker compose up -d --build
 ```
+
+Сервисы: postgres (5432), redis (6379), backend (8000), frontend (5173), celery worker, celery-beat.
 
 - **Frontend:** http://localhost:5173
 - **Backend API:** http://localhost:8000
@@ -14,76 +14,40 @@ docker compose up -d --build
 
 Остановка: `docker compose down`
 
----
+## Prod
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Порты: 8085 (HTTP), 8445 (HTTPS), 5435 (Postgres), 6382 (Redis).
 
 ## Локальный запуск
 
-**Нужно:** установленные Python 3.11+, Node.js, PostgreSQL, Redis (опционально).
+**Вариант 1 — Скрипты (Windows):**
+- `run-backend.bat` — backend
+- `run-frontend.bat` — frontend
 
-### Вариант 1: Скрипты (Windows)
-
-Открыть **два** терминала:
-
-1. **Backend:** `run-backend.bat` — создаёт venv, ставит зависимости, миграции, запускает API
-2. **Frontend:** `run-frontend.bat` — ставит npm-зависимости, запускает UI
-
-### Вариант 2: Вручную
-
-**Терминал 1 — Backend:**
+**Вариант 2 — Вручную:**
 ```bash
-cd backend
-copy .env.example .env    # Windows
-# cp .env.example .env   # Linux/Mac
-
-py -m venv venv          # или: python3 -m venv venv
-venv\Scripts\activate    # Windows
-# source venv/bin/activate  # Linux/Mac
-
-pip install -r requirements.txt
-alembic upgrade head
+# Терминал 1
+cd backend && cp .env.example .env
+py -m venv venv && venv\Scripts\activate
+pip install -r requirements.txt && alembic upgrade head
 uvicorn app.main:app --reload --port 8000
+
+# Терминал 2
+cd frontend && npm install && npm run dev
 ```
 
-**Терминал 2 — Frontend:**
+**PostgreSQL/Redis:** Docker `postgres redis` или локальная установка.
+
+**Celery (batch deploy, auto-generate):**
 ```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Перед первым запуском
-
-**Вариант A: Docker** (если Docker Desktop запущен)
-```bash
-docker compose up -d
-```
-Создаст PostgreSQL и Redis на портах 5432 и 6379.
-
-**Вариант B: Локальный PostgreSQL**
-Создай БД:
-```sql
-CREATE USER dorvey WITH PASSWORD 'dorvey';
-CREATE DATABASE dorvey OWNER dorvey;
-```
-
-### Celery (опционально)
-
-```bash
-cd backend
-venv\Scripts\activate
 celery -A app.celery_app worker -l info
+celery -A app.celery_app beat -l info
 ```
-
----
-
-## Адреса
-
-- **Frontend:** http://localhost:5173
-- **Backend API:** http://localhost:8000
-- **API Docs:** http://localhost:8000/api/docs
-
----
 
 ## Регистрация
 
-Открой http://localhost:5173 → Register → создай аккаунт → войди.
+http://localhost:5173 → Register → войди. Первый пользователь получает роль admin.

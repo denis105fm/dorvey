@@ -19,6 +19,7 @@ class RulesBuilder(BaseModel):
     auto_switch_on_cr_drop: Optional[bool] = None
     auto_rollback_on_cr_drop: Optional[bool] = None
     rollback_threshold_percent: Optional[float] = None
+    auto_generate_enabled: Optional[bool] = None
 
 
 async def _check(db, campaign_id: int, user_id: int):
@@ -42,6 +43,7 @@ async def get_rules(campaign_id: int, current_user: CurrentUser, db: AsyncSessio
         "auto_switch_on_cr_drop": offers_conf.get("auto_switch_on_cr_drop"),
         "auto_rollback_on_cr_drop": ai_conf.get("auto_rollback_on_cr_drop"),
         "rollback_threshold_percent": ai_conf.get("rollback_threshold_percent"),
+        "auto_generate_enabled": rules.get("auto_generate_enabled", False),
     }
 
 
@@ -69,6 +71,8 @@ async def update_rules(campaign_id: int, data: RulesBuilder, current_user: Curre
         rules["ai"]["auto_rollback_on_cr_drop"] = data.auto_rollback_on_cr_drop
     if data.rollback_threshold_percent is not None:
         rules["ai"]["rollback_threshold_percent"] = data.rollback_threshold_percent
+    if data.auto_generate_enabled is not None:
+        rules["auto_generate_enabled"] = data.auto_generate_enabled
     c.affiliate_rules = rules
     await db.commit()
     return {"status": "ok"}

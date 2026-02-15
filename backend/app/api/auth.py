@@ -20,21 +20,8 @@ async def register(
     data: UserCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).where(User.email == data.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already registered")
-    # First user in system becomes admin
-    count = await db.execute(select(User))
-    is_first = len(count.scalars().all()) == 0
-    user = User(
-        email=data.email,
-        password_hash=get_password_hash(data.password),
-        role=UserRole.ADMIN.value if is_first else UserRole.USER.value,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+    """Регистрация отключена. Пользователей создаёт только администратор."""
+    raise HTTPException(status_code=403, detail="Регистрация отключена. Обратитесь к администратору.")
 
 
 @router.post("/bootstrap-admin")

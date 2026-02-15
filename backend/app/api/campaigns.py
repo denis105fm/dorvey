@@ -25,13 +25,22 @@ async def list_campaigns(
     return result.scalars().all()
 
 
+DEFAULT_AFFILIATE_RULES = {
+    "ai": {"auto_rollback_on_cr_drop": True, "rollback_threshold_percent": 15},
+    "offers": {"auto_switch_on_cr_drop": False},
+}
+
+
 @router.post("/", response_model=CampaignResponse)
 async def create_campaign(
     data: CampaignCreate,
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    campaign = Campaign(user_id=current_user.id, **data.model_dump())
+    dump = data.model_dump()
+    if dump.get("affiliate_rules") is None:
+        dump["affiliate_rules"] = DEFAULT_AFFILIATE_RULES
+    campaign = Campaign(user_id=current_user.id, **dump)
     db.add(campaign)
     await db.commit()
     await db.refresh(campaign)

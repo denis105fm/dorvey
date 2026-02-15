@@ -56,18 +56,48 @@ TRUST_VARIANTS_RU = [
     '<span>✓ Проверено</span><span>🔒 Безопасно</span><span>⚡ Быстро</span>',
     '<span>⚡ Быстро</span><span>✓ Проверено</span><span>🔒 Безопасно</span>',
     '<span class="badge">🔒 Безопасно</span><span class="badge">✓ Проверено</span>',
+    '<span>Официальный партнёр</span><span>✓ Одобрено</span><span>Служба поддержки 24/7</span>',
+    '<span>✓ Лучшие условия</span><span>Проверенные данные</span><span>Без скрытых комиссий</span>',
+    '<span>Свыше 50 000 клиентов</span><span>✓ Рекомендовано экспертами</span><span>Бесплатная консультация</span>',
+    '<span>✓ Лучшая цена</span><span>Гарантия возврата</span><span>Быстрое оформление</span>',
 ]
 
 TRUST_VARIANTS_EN = [
     '<span>🔒 Secure</span><span>✓ Verified</span><span>⚡ Fast</span>',
     '<span>✓ Verified</span><span>🔒 Secure</span><span>⚡ Fast</span>',
     '<span>⚡ Fast</span><span>✓ Verified</span><span>🔒 Secure</span>',
+    '<span class="badge">🔒 Secure</span><span class="badge">✓ Verified</span>',
+    '<span>Official Partner</span><span>✓ Approved</span><span>24/7 Support</span>',
+    '<span>✓ Best Rates</span><span>Verified Data</span><span>No Hidden Fees</span>',
+    '<span>50,000+ Customers</span><span>✓ Expert Recommended</span><span>Free Consultation</span>',
 ]
+
+TRUST_VARIANTS_DE = [
+    '<span>🔒 Sicher</span><span>✓ Geprüft</span><span>⚡ Schnell</span>',
+    '<span>✓ Geprüft</span><span>🔒 Sicher</span><span>24/7 Support</span>',
+    '<span>Offizieller Partner</span><span>✓ Empfohlen</span>',
+]
+
+TRUST_VARIANTS_ES = [
+    '<span>🔒 Seguro</span><span>✓ Verificado</span><span>⚡ Rápido</span>',
+    '<span>✓ Verificado</span><span>Soporte 24/7</span><span>Sin comisiones ocultas</span>',
+]
+
+TRUST_VARIANTS_PL = [
+    '<span>🔒 Bezpiecznie</span><span>✓ Zweryfikowane</span><span>⚡ Szybko</span>',
+    '<span>✓ Sprawdzone</span><span>Oficjalny partner</span>',
+]
+
+TRUST_BY_LANG = {
+    "ru": TRUST_VARIANTS_RU, "en": TRUST_VARIANTS_EN,
+    "de": TRUST_VARIANTS_DE, "es": TRUST_VARIANTS_ES, "pl": TRUST_VARIANTS_PL,
+}
 
 
 def build_trust_elements_html(lang: str = "ru", seed: Optional[int] = None) -> str:
     """Trust badges HTML. Variants reduce structural fingerprint."""
-    variants = TRUST_VARIANTS_RU if lang == "ru" else TRUST_VARIANTS_EN
+    lang_key = (lang or "ru").lower()[:2]
+    variants = TRUST_BY_LANG.get(lang_key, TRUST_VARIANTS_EN)
     if seed is not None:
         return variants[seed % len(variants)]
     return random.choice(variants)

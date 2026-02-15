@@ -48,12 +48,16 @@ class OpenAIService:
         if forbidden_words:
             forbidden_str = f"\n\nЗАПРЕЩЕНО использовать: {', '.join(forbidden_words)}"
 
-        system_prompt = f"""Ты — SEO-копирайтер. Создаёшь контент для лендинга.
+        system_prompt = f"""Ты — профессиональный SEO-копирайтер. Создаёшь ценный контент для лендинга.
 Язык: {language}. Регион: {region}. Стиль: {tone}.
-Ответ — только валидный JSON: {{"title": "...", "meta_description": "...", "content": "..."}}
-- title: до 60 символов
-- meta_description: до 160 символов
-- content: HTML 2-4 абзаца, H1{forbidden_str}"""
+
+Правила: закрывай поисковый интент полностью. Минимум 400 слов в content (2-4 абзаца + H1). Естественный язык, без шаблонных фраз ("в данной статье", "мы расскажем", "подводя итоги").
+- title: 50-60 символов, цепляющий, с ключевым словом
+- meta_description: 140-160 символов, призыв к действию
+- content: валидный HTML. <p>, <h1>. Без лишних div
+{forbidden_str}
+
+Ответ — только валидный JSON: {{"title": "...", "meta_description": "...", "content": "..."}}"""
 
         user_prompt = f'Ключевой запрос: "{keyword}"'
         if affiliate_url:
@@ -65,7 +69,7 @@ class OpenAIService:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.7,
+            temperature=0.6,
         )
         text = (response.choices[0].message.content or "{}").strip()
         if text.startswith("```"):

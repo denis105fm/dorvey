@@ -125,16 +125,17 @@ Google не ищет слово «дорвей» — он ищет **патте�
 
 ### B. Deploy staggering
 
-- Batch deploy: между каждым деплоем пауза `random(min_delay, max_delay)` сек
-- Рекомендации: min 30 сек, max 5 мин для больших батчей
-- Cron: размазывать задания по часам, не в одну секунду
+- Batch deploy: между каждым деплоем пауза `random(deploy_delay_min, deploy_delay_max)` сек
+- **Рекомендации:** min 30 сек, max 5 мин для больших батчей (настраивается в конфиге кампании/сервера)
+- Cron: задачи Celery Beat в 3:00 и 4:30 — разнесены по времени
 
 ### C. Content quality checks (pre-deploy)
 
-- Минимальная длина content
-- Соответствие keyword ↔ title
-- Наличие хотя бы 1 FAQ/ответа на интент
-- Проверка на «пустые» шаблонные фразы (blacklist)
+- **Минимальная длина content** — 400 символов (MIN_CONTENT_LENGTH), рекомендуется 600+; AI — 400+ слов
+- **Title** — min 20 символов; meta description — 80+
+- **Keyword alignment** — keyword должен быть в title и content
+- **FAQ** — хотя бы 1 Q&A на интент (cloaking_rules.faq_qa)
+- **Blacklist фраз** — ~22 шаблонные фразы (anti_detection.TEMPLATE_PHRASE_BLACKLIST)
 
 ### D. Analytics и обновления
 
@@ -154,4 +155,4 @@ Google не ищет слово «дорвей» — он ищет **патте�
 
 ---
 
-*См. также: `backend/app/services/anti_detection.py` — реализация рандомизации и проверок.*
+*См. также: `backend/app/services/anti_detection.py` — рандомизация, StaggerConfig, check_content_quality, TEMPLATE_PHRASE_BLACKLIST (~22 фразы).*

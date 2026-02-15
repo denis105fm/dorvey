@@ -46,7 +46,8 @@ async def get_recommendations(
     ctr = (total_clk / total_imp * 100) if total_imp else 0
     cr = (total_conv / total_clk * 100) if total_clk else 0
 
-    if not openai_service.is_available():
+    user_openai_key = await get_user_openai_key(db, camp.user_id)
+    if not openai_service.is_available(user_openai_key):
         recs = []
         if ctr < 2 and total_imp > 100:
             recs.append({"type": "ctr", "text": "Низкий CTR. Улучшите title и meta."})
@@ -57,7 +58,8 @@ async def get_recommendations(
         return recs or [{"type": "info", "text": "Метрики в норме."}]
 
     prompt = f"""Дорвей title="{dw.title}". Метрики: показы={total_imp}, клики={total_clk}, CTR={ctr:.2f}%, конв={total_conv}, CR={cr:.2f}%, выручка={total_rev:.2f}, ср.позиция={avg_pos:.1f}.
-Дай 1-3 рекомендации. JSON: [{{"type":"ctr|cr|position|content","text":"..."}}]"""
+Дай 1-3 конкретные рекомендации по улучшению. Учитывай: низкий CTR — улучшить title/meta; низкая CR — проверить CTA и оффер; слабая позиция — больше контента.
+JSON: [{{"type":"ctr|cr|position|content","text":"конкретный совет"}}]"""
     try:
         client = openai_service.get_client_for_key(user_openai_key)
         resp = await client.chat.completions.create(
@@ -192,15 +194,17 @@ async def apply_recommendation(
         return False, "Doorway не найден", None
     dw, camp = row
 
-    if not openai_service.is_available():
+    user_openai_key = await get_user_openai_key(db, camp.user_id)
+    if not openai_service.is_available(user_openai_key):
         return False, "OpenAI недоступен", None
 
     prompt = f"""Дорвей: title="{dw.title}", meta="{dw.meta_description or ''}", content (начало): "{str(dw.content or '')[:500]}".
 Рекомендация: {rec_text} (тип: {rec_type}).
-Сгенерируй улучшенную версию. Ответ — JSON: {{"title":"...", "meta_description":"...", "content":"..."}}
-- title: до 60 символов, цепляющий
-- meta_description: до 160 символов
-- content: полный HTML (все абзацы, H1, структура). Сохраняй тему и стиль."""
+Сгенерируй улучшенную версию. Сохраняй тему, тон и объём. Без шаблонных фраз.
+JSON: {{"title":"...", "meta_description":"...", "content":"..."}}
+- title: 50-60 символов, цепляющий
+- meta_description: 140-160 символов
+- content: полный HTML, H1 + параграфы <p>, минимум 400 слов"""
 
     try:
         client = openai_service.get_client_for_key(user_openai_key)

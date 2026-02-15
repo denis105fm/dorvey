@@ -15,6 +15,8 @@ LAYOUT_CSS_VARIANTS = [
     {"main": "dv-main", "cta": "cta", "trust": "trust-elements"},
     {"main": "content-wrap", "cta": "btn-cta", "trust": "badges"},
     {"main": "page-body", "cta": "cta", "trust": "trust-elements"},
+    {"main": "article-body", "cta": "cta", "trust": "trust-elements"},
+    {"main": "main-content", "cta": "btn-cta", "trust": "badges"},
 ]
 
 DEFAULT_PAGE_TEMPLATE = """<!DOCTYPE html>

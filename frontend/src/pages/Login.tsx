@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../hooks/useAuth";
 
@@ -131,12 +131,6 @@ export default function Login() {
             </button>
           </div>
           )}
-          <p className="mt-4 text-center text-slate-400 text-sm">
-            Нет аккаунта?{" "}
-            <Link to="/register" className="text-emerald-400 hover:underline">
-              Регистрация
-            </Link>
-          </p>
         </form>
       </div>
     </div>

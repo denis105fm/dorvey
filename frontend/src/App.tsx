@@ -3,7 +3,6 @@ import { useAuth } from "./hooks/useAuth";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
-import Register from "./pages/Register";
 import Campaigns from "./pages/Campaigns";
 import Doorways from "./pages/Doorways";
 import Templates from "./pages/Templates";
@@ -28,7 +27,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        <Route path="/register" element={<Navigate to="/login" replace />} />
         <Route
           path="/"
           element={
