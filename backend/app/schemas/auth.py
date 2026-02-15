@@ -9,7 +9,7 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    email: str  # str чтобы принять admin@dorvey.local и др. нестандартные домены
     password: str
 
 
