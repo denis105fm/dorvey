@@ -60,7 +60,7 @@ export default function Dashboard() {
       </div>
       <h2 className="text-lg font-semibold text-white mt-8 mb-4">Метрики за 30 дней</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {metrics.map(({ label, value, icon: Icon, color }) => (
+        {metrics.map(({ label, value, icon: Icon }) => (
           <div key={label} className="bg-slate-800/80 rounded-xl p-5 border border-slate-700">
             <div className="flex items-center justify-between">
               <span className="text-slate-400 text-sm">{label}</span>
