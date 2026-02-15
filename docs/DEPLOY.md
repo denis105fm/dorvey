@@ -6,8 +6,8 @@
 |--------|----------|
 | `DEPLOY_HOST` | IP или hostname сервера |
 | `DEPLOY_USER` | SSH пользователь |
-| `SSH_PRIVATE_KEY` | Приватный SSH ключ (содержимое ~/.ssh/id_rsa) |
-| `DEPLOY_PATH` | Путь к клону репозитория на сервере (напр. `/home/user/dorvey`) |
+| `DEPLOY_KEY` | Приватный SSH ключ (содержимое ~/.ssh/id_rsa) |
+| `DEPLOY_PATH` | Путь к клону репозитория на сервере (напр. `/opt/dorvey`) |
 
 ## Подготовка сервера
 
