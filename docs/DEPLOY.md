@@ -60,6 +60,15 @@ REDIS_URL=redis://redis:6382/0
 - Certbot/Let's Encrypt: настройте отдельно в nginx на хосте или через reverse-proxy (Traefik/Caddy).
 - Файл `nginx.conf` в проекте — шаблон для проксирования на backend/frontend.
 
+## Первый вход
+
+При первом развёртывании автоматически создаётся администратор (если в БД нет пользователей):
+
+- **Email:** `admin@dorvey.local` (или `DEFAULT_ADMIN_EMAIL` из .env)
+- **Пароль:** `ChangeMeNow123!` (или `DEFAULT_ADMIN_PASSWORD` из .env)
+
+Сразу после входа смени пароль (Settings или через создание нового админа и удаление дефолтного).
+
 ## Health check
 
 - Backend: `GET /health` или `GET /api/docs`
