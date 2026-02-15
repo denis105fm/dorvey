@@ -41,7 +41,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dorvey}:${POSTGRES_PASSWORD:-dorvey}@postgres:5432/${POSTGRES_DB:-dorvey}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
-      CORS_ORIGINS: '["http://localhost:8085","http://127.0.0.1:8085","https://localhost:8445","https://127.0.0.1:8445","${APP_URL}"]'
+      CORS_ORIGINS: '["http://localhost:8085","http://127.0.0.1:8085","https://localhost:8445","https://127.0.0.1:8445","${APP_URL:-http://localhost:8085}"]'
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       DEBUG: "false"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

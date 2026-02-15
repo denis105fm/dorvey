@@ -41,7 +41,11 @@ jobs:
             docker compose -f docker-compose.prod.yml down
 
             echo "Building and starting..."
-            docker compose -f docker-compose.prod.yml up -d --build
+            docker compose -f docker-compose.prod.yml up -d --build || {
+              echo "=== Deploy failed, showing backend logs ==="
+              docker compose -f docker-compose.prod.yml logs backend
+              exit 1
+            }
 
             echo "Waiting for startup..."
             sleep 15

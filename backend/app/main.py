@@ -16,6 +16,31 @@ from app.api import (
     seo, broken_links_api, rules, billing, users_admin,
 )
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
+from app.core.security import get_password_hash
+from app.models.user import User, UserRole
+
+
+async def ensure_default_admin():
+    """Create default admin if no users exist (first deploy)."""
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(func.count(User.id)))
+        if (r.scalar() or 0) > 0:
+            return
+        admin = User(
+            email=settings.DEFAULT_ADMIN_EMAIL,
+            password_hash=get_password_hash(settings.DEFAULT_ADMIN_PASSWORD),
+            role=UserRole.ADMIN.value,
+        )
+        db.add(admin)
+        await db.commit()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await ensure_default_admin()
+    yield
+
 
 app = FastAPI(
     title="Dorvey API",
