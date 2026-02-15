@@ -19,23 +19,35 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           script: |
-            cd /opt/dorvey
+            set -e
+            APP_DIR="/opt/dorvey"
+            REPO_URL="git@github.com:${{ github.repository }}.git"
 
-            # подтягиваем свежий код из main
-            git fetch origin main
-            git reset --hard origin/main
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "First deployment: creating $APP_DIR and cloning..."
+              sudo mkdir -p "$APP_DIR"
+              sudo chown $(whoami):$(whoami) "$APP_DIR"
+              ssh-keyscan -t rsa,ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+              git clone --branch main "$REPO_URL" "$APP_DIR"
+              cd "$APP_DIR"
+            else
+              echo "Updating existing repository..."
+              cd "$APP_DIR"
+              git fetch origin main
+              git reset --hard origin/main
+            fi
 
-            # останавливаем контейнеры
+            echo "Stopping containers..."
             docker compose -f docker-compose.prod.yml down
 
-            # пересобираем образы
-            docker compose -f docker-compose.prod.yml build backend frontend celery celery-beat
+            echo "Building and starting..."
+            docker compose -f docker-compose.prod.yml up -d --build
 
-            # поднимаем всё
-            docker compose -f docker-compose.prod.yml up -d
-
-            # ждём старта
+            echo "Waiting for startup..."
             sleep 15
 
-            # прогрев
+            echo "Container status:"
+            docker compose -f docker-compose.prod.yml ps
+
+            echo "Warmup..."
             curl -sS "http://localhost:8085/api/health" > /dev/null || true

@@ -39,6 +39,8 @@ REDIS_URL=redis://redis:6382/0
 
 4. Добавить публичный ключ GitHub Actions в `~/.ssh/authorized_keys` сервера.
 
+5. **Первый деплой (clone по SSH):** на сервере должен быть Deploy Key для приватного репо — Settings → Deploy keys в GitHub, добавить публичный ключ из `~/.ssh/id_rsa.pub` сервера. Или использовать HTTPS-клон (тогда нужен токен).
+
 ## Порты (production)
 
 | Сервис | Порт |
