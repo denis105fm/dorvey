@@ -27,7 +27,7 @@ type IntegrationsData = {
 export default function Settings() {
   const qc = useQueryClient();
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookEvents, setWebhookEvents] = useState<string[]>(["doorway.deployed", "doorway.conversion"]);
+  const [webhookEvents] = useState<string[]>(["doorway.deployed", "doorway.conversion"]);
 
   const [integrations, setIntegrations] = useState<IntegrationsData>({});
   const [whitelabel, setWhitelabel] = useState<{

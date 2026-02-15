@@ -12,6 +12,9 @@ env/
 
 # Build / IDE
 dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
 build/
 .idea/
 .vscode/

@@ -63,6 +63,10 @@ export default function Servers() {
                     <td className="px-4 py-3 text-slate-400">{s.host}</td>
                     <td className="px-4 py-3 text-slate-400">{s.port}</td>
                     <td className="px-4 py-3 text-slate-400">{s.user}</td>
+                    <td className="px-4 py-3">
+                      <button onClick={() => openEdit(s)} className="text-emerald-400 hover:underline text-sm mr-2">Изменить</button>
+                      <button onClick={() => deleteMut.mutate(s.id)} className="text-red-400 hover:underline text-sm">Удалить</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
