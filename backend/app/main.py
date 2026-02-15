@@ -3,8 +3,11 @@ Dorvey - Smart Doorway Generation System
 Backend FastAPI Application
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select, func
 
 from app.api import (
     auth, campaigns, doorways, servers, domains, templates, keywords,
@@ -18,6 +21,7 @@ app = FastAPI(
     title="Dorvey API",
     description="Система умных дорвеев с AI-оптимизацией",
     version="0.1.0",
+    lifespan=lifespan,
     docs_url="/api/docs" if settings.DEBUG else None,
     redoc_url="/api/redoc" if settings.DEBUG else None,
 )

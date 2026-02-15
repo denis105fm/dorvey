@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     S3_BUCKET: str = "dorvey"
     S3_REGION: str = "us-east-1"
 
+    # Default admin (created on first deploy if no users exist)
+    DEFAULT_ADMIN_EMAIL: str = "admin@dorvey.local"
+    DEFAULT_ADMIN_PASSWORD: str = "ChangeMeNow123!"
+
     # JWT
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_EXPIRE_MINUTES: int = 60

@@ -48,6 +48,10 @@ celery -A app.celery_app worker -l info
 celery -A app.celery_app beat -l info
 ```
 
-## Регистрация
+## Первый вход
 
-http://localhost:5173 → Register → войди. Первый пользователь получает роль admin.
+Регистрация отключена. При первом запуске создаётся дефолтный админ:
+- **Email:** admin@dorvey.local
+- **Пароль:** ChangeMeNow123!
+
+Смени пароль после входа.
