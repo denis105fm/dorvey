@@ -31,6 +31,12 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dorvey}:${POSTGRES_PASSWORD:-dorvey}@postgres:5432/${POSTGRES_DB:-dorvey}
       REDIS_URL: redis://redis:6379/0
@@ -60,8 +66,10 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
 
   celery:
     build:

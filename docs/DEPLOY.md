@@ -74,6 +74,21 @@ REDIS_URL=redis://redis:6382/0
 - Backend: `GET /health` или `GET /api/docs`
 - Frontend: корневая страница
 
+## 502 Bad Gateway при логине
+
+Backend не отвечает. На сервере выполни:
+
+```bash
+cd /opt/dorvey
+docker compose -f docker-compose.prod.yml ps          # все ли контейнеры running?
+docker compose -f docker-compose.prod.yml logs backend  # ошибки backend?
+```
+
+Частые причины:
+- Нет `.env` в корне — создай по примеру выше
+- Backend ещё стартует — подожди 1–2 мин (alembic + uvicorn)
+- Postgres не готов — проверь логи postgres
+
 ## Откат
 
 ```bash
