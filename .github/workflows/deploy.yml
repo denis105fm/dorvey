@@ -19,7 +19,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           script: |
-            cd ${{ secrets.DEPLOY_PATH }}
+            cd /opt/dorvey
 
             # подтягиваем свежий код из main
             git fetch origin main
