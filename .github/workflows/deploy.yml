@@ -37,7 +37,7 @@ jobs:
               git reset --hard origin/main
             fi
 
-            echo "Stopping containers..."
+            echo "Stopping containers (volumes preserved - do NOT use down -v)..."
             docker compose -f docker-compose.prod.yml down
 
             echo "Building and starting..."
@@ -47,7 +47,7 @@ jobs:
               exit 1
             }
 
-            echo "Waiting for startup..."
+            echo "Waiting for Postgres and backend (alembic upgrade head runs on backend start)..."
             sleep 15
 
             echo "Container status:"
@@ -55,3 +55,5 @@ jobs:
 
             echo "Warmup..."
             curl -sS "http://localhost:8085/api/health" > /dev/null || true
+
+            echo "Deploy done. DB data is in volume postgres_data (persists across deploys)."

@@ -52,8 +52,9 @@ REDIS_URL=redis://redis:6382/0
 
 После `git push origin main` workflow:
 1. Подключается по SSH
-2. Переходит в `DEPLOY_PATH`
-3. Выполняет `git pull`, `docker compose -f docker-compose.prod.yml up -d --build`
+2. Переходит в каталог приложения, обновляет код (`git fetch` + `git reset --hard origin/main`)
+3. Останавливает контейнеры **без удаления томов** (`docker compose down` без `-v`) — данные PostgreSQL в томе `postgres_data` сохраняются
+4. Собирает и запускает контейнеры (`docker compose up -d --build`). При старте backend выполняет `alembic upgrade head` (только миграции, без пересоздания БД)
 
 ## SSL (HTTPS)
 
