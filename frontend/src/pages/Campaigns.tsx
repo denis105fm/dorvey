@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import api from "../api/client";
 
 type Campaign = {
@@ -17,10 +18,28 @@ export default function Campaigns() {
   const qc = useQueryClient();
   const [abCampaignId, setAbCampaignId] = useState<number | null>(null);
   const [rulesCampaignId, setRulesCampaignId] = useState<number | null>(null);
+  const [conversionCampaignId, setConversionCampaignId] = useState<number | null>(null);
   const [trafficCampaignId, setTrafficCampaignId] = useState<number | null>(null);
+  const [copyCampaignId, setCopyCampaignId] = useState<number | null>(null);
+  const [copyCloakingCampaignId, setCopyCloakingCampaignId] = useState<number | null>(null);
+  const [copyTargetId, setCopyTargetId] = useState<number>(0);
+  const [copySourceId, setCopySourceId] = useState<number>(0);
+  const [cloakingTargetId, setCloakingTargetId] = useState<number>(0);
+  const [cloakingSourceId, setCloakingSourceId] = useState<number>(0);
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [edit, setEdit] = useState<Campaign | null>(null);
   const [form, setForm] = useState({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" });
+  const [convForm, setConvForm] = useState({
+    urgency_text: "",
+    social_stats: "",
+    review1: "",
+    review2: "",
+    review3: "",
+    exit_title: "",
+    exit_cta: "",
+    cta_desktop: "",
+    cta_mobile: "",
+  });
 
   const { data: campaigns, isLoading } = useQuery({
     queryKey: ["campaigns"],
@@ -41,23 +60,82 @@ export default function Campaigns() {
     queryFn: () => api.get(`/rules/campaign/${rulesCampaignId}`).then((r) => r.data),
     enabled: !!rulesCampaignId,
   });
+  const { data: conversion, isLoading: conversionLoading } = useQuery({
+    queryKey: ["conversion", conversionCampaignId],
+    queryFn: () => api.get(`/rules/campaign/${conversionCampaignId}/conversion`).then((r) => r.data),
+    enabled: !!conversionCampaignId,
+  });
+  const { data: copyDoorways } = useQuery({
+    queryKey: ["doorways", copyCampaignId],
+    queryFn: () => api.get("/doorways/", { params: copyCampaignId ? { campaign_id: copyCampaignId } : {} }).then((r) => r.data),
+    enabled: !!copyCampaignId,
+  });
+  const { data: cloakingDoorways } = useQuery({
+    queryKey: ["doorways", copyCloakingCampaignId],
+    queryFn: () => api.get("/doorways/", { params: copyCloakingCampaignId ? { campaign_id: copyCloakingCampaignId } : {} }).then((r) => r.data),
+    enabled: !!copyCloakingCampaignId,
+  });
+  const copyWinnerMut = useMutation({
+    mutationFn: (d: { source_doorway_id: number; target_doorway_id: number }) =>
+      api.post(`/optimizer/campaign/${copyCampaignId}/copy-winner`, d).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      toast.success("Контент победителя скопирован");
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
+  const copyCloakingMut = useMutation({
+    mutationFn: (d: { source_doorway_id: number; target_doorway_id: number }) =>
+      api.post(`/optimizer/campaign/${copyCloakingCampaignId}/copy-cloaking-from-winner`, d).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      setCopyCloakingCampaignId(null);
+      toast.success("Настройки (urgency, FAQ, CTA) скопированы");
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
 
   const createMut = useMutation({
     mutationFn: (d: typeof form) => api.post("/campaigns/", d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); setModal(null); setForm({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); setModal(null); setForm({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" }); toast.success("Кампания создана"); },
   });
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<typeof form> }) => api.patch(`/campaigns/${id}`, data).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); setModal(null); setEdit(null); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); setModal(null); setEdit(null); toast.success("Кампания обновлена"); },
   });
   const deleteMut = useMutation({
     mutationFn: (id: number) => api.delete(`/campaigns/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["campaigns"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); toast.success("Кампания удалена"); },
   });
   const updateRulesMut = useMutation({
     mutationFn: (data: Record<string, unknown>) => api.put(`/rules/campaign/${rulesCampaignId}`, data).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rules", rulesCampaignId] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules", rulesCampaignId] }); toast.success("Правила сохранены"); },
   });
+  const updateConversionMut = useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.put(`/rules/campaign/${conversionCampaignId}/conversion`, data).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["conversion", conversionCampaignId] }); toast.success("Настройки конверсии сохранены"); },
+  });
+
+  useEffect(() => {
+    if (!conversion) return;
+    const u = conversion.urgency_block;
+    const sp = conversion.social_proof;
+    const ei = conversion.exit_intent;
+    const cta = conversion.cta_by_device;
+    setConvForm({
+      urgency_text: typeof u === "string" ? u : (u?.text ?? ""),
+      social_stats: typeof sp === "string" ? "" : (sp?.stats ?? ""),
+      review1: (typeof sp !== "string" && sp?.reviews?.[0]) ?? "",
+      review2: (typeof sp !== "string" && sp?.reviews?.[1]) ?? "",
+      review3: (typeof sp !== "string" && sp?.reviews?.[2]) ?? "",
+      exit_title: ei?.title ?? ei?.text ?? "",
+      exit_cta: ei?.cta_text ?? ei?.cta ?? "",
+      cta_desktop: cta?.desktop ?? "",
+      cta_mobile: cta?.mobile ?? "",
+    });
+  }, [conversion]);
 
   const openEdit = (c: Campaign) => {
     setEdit(c);
@@ -104,7 +182,10 @@ export default function Campaigns() {
                       <td className="px-4 py-3 flex gap-2 flex-wrap">
                         <button onClick={() => setAbCampaignId(abCampaignId === c.id ? null : c.id)} className="text-amber-400 hover:underline text-sm">A/B</button>
                         <button onClick={() => setTrafficCampaignId(trafficCampaignId === c.id ? null : c.id)} className="text-blue-400 hover:underline text-sm">Traffic mix</button>
+                        <button onClick={() => setCopyCampaignId(copyCampaignId === c.id ? null : c.id)} className="text-cyan-400 hover:underline text-sm">Copy winner</button>
+                        <button onClick={() => setCopyCloakingCampaignId(copyCloakingCampaignId === c.id ? null : c.id)} className="text-orange-400 hover:underline text-sm">Копировать настройки</button>
                         <button onClick={() => setRulesCampaignId(rulesCampaignId === c.id ? null : c.id)} className="text-violet-400 hover:underline text-sm">Правила</button>
+                        <button onClick={() => setConversionCampaignId(conversionCampaignId === c.id ? null : c.id)} className="text-amber-400 hover:underline text-sm">Конверсия</button>
                         <button onClick={() => openEdit(c)} className="text-emerald-400 hover:underline text-sm">Изменить</button>
                         <button onClick={() => window.confirm("Удалить?") && deleteMut.mutate(c.id)} disabled={deleteMut.isPending} className="text-red-400 hover:underline text-sm">Удалить</button>
                       </td>
@@ -116,6 +197,54 @@ export default function Campaigns() {
               <div className="p-8 text-center text-slate-400">Пока нет кампаний</div>
             )}
           </div>
+          {copyCloakingCampaignId && (
+            <div className="p-5 bg-slate-800/80 rounded-xl border border-slate-700">
+              <h2 className="text-lg font-medium text-white mb-3">Скопировать настройки с победителя — кампания #{copyCloakingCampaignId}
+                <button onClick={() => setCopyCloakingCampaignId(null)} className="ml-2 text-slate-400 hover:text-white text-sm">✕</button>
+              </h2>
+              <p className="text-slate-400 text-sm mb-3">Скопировать cloaking_rules (urgency, social proof, exit-intent, FAQ, CTA) с лучшего по CR дорвея.</p>
+              <div className="flex gap-4 flex-wrap items-end">
+                <div>
+                  <label className="block text-slate-400 text-xs mb-1">Источник (0 = авто по CR)</label>
+                  <input type="number" min={0} value={cloakingSourceId} onChange={(e) => setCloakingSourceId(parseInt(e.target.value) || 0)} className="w-24 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs mb-1">Целевой дорвей</label>
+                  <select value={cloakingTargetId} onChange={(e) => setCloakingTargetId(parseInt(e.target.value) || 0)} className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
+                    <option value={0}>—</option>
+                    {cloakingDoorways?.map((d: { id: number; path: string }) => <option key={d.id} value={d.id}>#{d.id} {d.path}</option>)}
+                  </select>
+                </div>
+                <button onClick={() => copyCloakingMut.mutate({ source_doorway_id: cloakingSourceId, target_doorway_id: cloakingTargetId })} disabled={!cloakingTargetId || copyCloakingMut.isPending} className="px-4 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 rounded-lg text-white text-sm">
+                  {copyCloakingMut.isPending ? "Копирую…" : "Скопировать"}
+                </button>
+              </div>
+            </div>
+          )}
+          {copyCampaignId && (
+            <div className="p-5 bg-slate-800/80 rounded-xl border border-slate-700">
+              <h2 className="text-lg font-medium text-white mb-3">Копировать победителя — кампания #{copyCampaignId}
+                <button onClick={() => setCopyCampaignId(null)} className="ml-2 text-slate-400 hover:text-white text-sm">✕</button>
+              </h2>
+              <p className="text-slate-400 text-sm mb-3">Скопировать контент (title, content, meta) с лучшего дорвея по CR на целевой.</p>
+              <div className="flex gap-4 flex-wrap items-end">
+                <div>
+                  <label className="block text-slate-400 text-xs mb-1">Источник (0 = авто по CR)</label>
+                  <input type="number" min={0} value={copySourceId} onChange={(e) => setCopySourceId(parseInt(e.target.value) || 0)} className="w-24 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs mb-1">Целевой дорвей</label>
+                  <select value={copyTargetId} onChange={(e) => setCopyTargetId(parseInt(e.target.value) || 0)} className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
+                    <option value={0}>—</option>
+                    {copyDoorways?.map((d: { id: number; path: string }) => <option key={d.id} value={d.id}>#{d.id} {d.path}</option>)}
+                  </select>
+                </div>
+                <button onClick={() => copyWinnerMut.mutate({ source_doorway_id: copySourceId, target_doorway_id: copyTargetId })} disabled={!copyTargetId || copyWinnerMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white text-sm">
+                  {copyWinnerMut.isPending ? "Копирую…" : "Скопировать"}
+                </button>
+              </div>
+            </div>
+          )}
           {abCampaignId && (
             <div className="p-5 bg-slate-800/80 rounded-xl border border-slate-700">
               <h2 className="text-lg font-medium text-white mb-3">A/B Winner — кампания #{abCampaignId}
@@ -144,6 +273,67 @@ export default function Campaigns() {
                 <button onClick={() => setTrafficCampaignId(null)} className="ml-2 text-slate-400 hover:text-white text-sm">✕</button>
               </h2>
               <pre className="text-slate-300 text-sm overflow-auto">{JSON.stringify(trafficMix, null, 2)}</pre>
+            </div>
+          )}
+          {conversionCampaignId && (
+            <div className="p-5 bg-slate-800/80 rounded-xl border border-slate-700">
+              <h2 className="text-lg font-medium text-white mb-3">Конверсия — кампания #{conversionCampaignId}
+                <button onClick={() => setConversionCampaignId(null)} className="ml-2 text-slate-400 hover:text-white text-sm">✕</button>
+              </h2>
+              <p className="text-slate-400 text-sm mb-4">Тексты для дорвеев кампании: urgency, social proof, exit-intent попап, CTA по устройству.</p>
+              {conversionLoading ? (
+                <p className="text-slate-400">Загрузка...</p>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-slate-400 text-sm mb-1">Urgency (жёлтый блок)</label>
+                    <input value={convForm.urgency_text} onChange={(e) => setConvForm((f) => ({ ...f, urgency_text: e.target.value }))} placeholder="Одобрение за 5 минут • Без отказа" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 text-sm mb-1">Social proof: статистика</label>
+                    <input value={convForm.social_stats} onChange={(e) => setConvForm((f) => ({ ...f, social_stats: e.target.value }))} placeholder="12 450 заявок одобрено" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 text-sm mb-1">Отзывы (до 3)</label>
+                    <input value={convForm.review1} onChange={(e) => setConvForm((f) => ({ ...f, review1: e.target.value }))} placeholder="Отзыв 1" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white mb-1" />
+                    <input value={convForm.review2} onChange={(e) => setConvForm((f) => ({ ...f, review2: e.target.value }))} placeholder="Отзыв 2" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white mb-1" />
+                    <input value={convForm.review3} onChange={(e) => setConvForm((f) => ({ ...f, review3: e.target.value }))} placeholder="Отзыв 3" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 text-sm mb-1">Exit-intent: заголовок</label>
+                    <input value={convForm.exit_title} onChange={(e) => setConvForm((f) => ({ ...f, exit_title: e.target.value }))} placeholder="Подождите! Специальное предложение" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 text-sm mb-1">Exit-intent: текст кнопки</label>
+                    <input value={convForm.exit_cta} onChange={(e) => setConvForm((f) => ({ ...f, exit_cta: e.target.value }))} placeholder="Получить скидку" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-400 text-sm mb-1">CTA desktop</label>
+                      <input value={convForm.cta_desktop} onChange={(e) => setConvForm((f) => ({ ...f, cta_desktop: e.target.value }))} placeholder="Узнать подробнее" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 text-sm mb-1">CTA mobile</label>
+                      <input value={convForm.cta_mobile} onChange={(e) => setConvForm((f) => ({ ...f, cta_mobile: e.target.value }))} placeholder="Оформить заявку" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                    </div>
+                  </div>
+                  <button onClick={() => {
+                    const payload: Record<string, unknown> = {};
+                    if (convForm.urgency_text.trim()) payload.urgency_block = { text: convForm.urgency_text.trim() };
+                    else payload.urgency_block = null;
+                    const reviews = [convForm.review1, convForm.review2, convForm.review3].filter(Boolean);
+                    if (convForm.social_stats.trim() || reviews.length) payload.social_proof = { stats: convForm.social_stats.trim() || undefined, reviews };
+                    else payload.social_proof = null;
+                    if (convForm.exit_title.trim() || convForm.exit_cta.trim()) payload.exit_intent = { title: convForm.exit_title.trim() || undefined, cta_text: convForm.exit_cta.trim() || undefined };
+                    else payload.exit_intent = null;
+                    if (convForm.cta_desktop.trim() || convForm.cta_mobile.trim()) payload.cta_by_device = { desktop: convForm.cta_desktop.trim() || undefined, mobile: convForm.cta_mobile.trim() || undefined };
+                    else payload.cta_by_device = null;
+                    updateConversionMut.mutate(payload);
+                  }} disabled={updateConversionMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white text-sm">
+                    {updateConversionMut.isPending ? "Сохранение…" : "Сохранить конверсию"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {rulesCampaignId && (

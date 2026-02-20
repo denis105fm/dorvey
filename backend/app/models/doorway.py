@@ -19,6 +19,7 @@ class Doorway(Base):
     content = Column(Text, nullable=True)
     meta_description = Column(String(500), nullable=True)
     cloaking_rules = Column(JSONB, default=dict)
+    content_variants = Column(JSONB, default=list)  # [{title, content, meta_description}, ...]
     status = Column(String(30), default="draft")  # draft, deployed, indexed, optimizing, paused
     created_at = Column(DateTime, default=datetime.utcnow)
     deployed_at = Column(DateTime, nullable=True)

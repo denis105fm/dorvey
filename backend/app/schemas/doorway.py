@@ -14,6 +14,7 @@ class DoorwayBase(BaseModel):
     content: Optional[str] = None
     meta_description: Optional[str] = None
     cloaking_rules: Optional[dict[str, Any]] = None
+    content_variants: Optional[list[dict[str, Any]]] = None
     status: str = "draft"
 
 
@@ -52,6 +53,7 @@ class DoorwayGenerateRequest(BaseModel):
     keyword: str
     path: str = "/"
     save: bool = True  # Create doorway in DB after generation
+    generate_faq: bool = False  # Generate 3-5 Q&A for FAQ/PAA schema
 
 
 class DoorwayGenerateResponse(BaseModel):
@@ -61,6 +63,7 @@ class DoorwayGenerateResponse(BaseModel):
     html: str
     doorway_id: Optional[int] = None  # If save=True
     validation_violations: Optional[list[str]] = None
+    faq_qa: Optional[list[dict[str, str]]] = None  # [{question, answer}, ...]
 
 
 class DoorwayResponse(DoorwayBase):

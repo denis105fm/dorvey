@@ -3,6 +3,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -67,11 +68,15 @@ async def generate_doorway_content(
             domain_id=data.domain_id,
             keyword=data.keyword,
             path=data.path,
+            generate_faq=data.generate_faq,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     doorway_id = None
     if data.save and result:
+        cloaking = {}
+        if result.get("faq_qa"):
+            cloaking["faq_qa"] = result["faq_qa"]
         dw = Doorway(
             campaign_id=data.campaign_id,
             domain_id=data.domain_id,
@@ -80,6 +85,7 @@ async def generate_doorway_content(
             content=result.get("content"),
             meta_description=result.get("meta_description"),
             status="draft",
+            cloaking_rules=cloaking if cloaking else None,
         )
         db.add(dw)
         await db.commit()
@@ -101,6 +107,7 @@ async def generate_doorway_content(
         html=result.get("html", ""),
         doorway_id=doorway_id,
         validation_violations=result.get("validation_violations"),
+        faq_qa=result.get("faq_qa"),
     )
 
 
@@ -176,19 +183,19 @@ async def doorway_quality_check(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """Pre-deploy content quality check (anti-detection)."""
+    """Pre-deploy content quality check (anti-detection) + campaign readiness."""
     from app.services.anti_detection import check_content_quality
 
     result = await db.execute(
-        select(Doorway)
+        select(Doorway, Campaign)
         .join(Campaign)
         .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
     )
-    doorway = result.scalar_one_or_none()
-    if not doorway:
+    row = result.first()
+    if not row:
         raise HTTPException(status_code=404, detail="Doorway not found")
+    doorway, campaign = row
     keyword = None
-    # Try to get keyword from path or campaign keywords
     from app.models.keyword import Keyword
     kw_r = await db.execute(
         select(Keyword.keyword).where(Keyword.campaign_id == doorway.campaign_id).limit(1)
@@ -202,7 +209,17 @@ async def doorway_quality_check(
         content=doorway.content or "",
         keyword=keyword,
     )
-    return {"ok": r.ok, "errors": r.errors, "warnings": r.warnings}
+    errors = list(r.errors)
+    warnings = list(r.warnings)
+    if not (campaign.affiliate_url or "").strip():
+        errors.append("Кампания без affiliate URL — CTA не будет работать")
+    cr = doorway.cloaking_rules or {}
+    camp_settings = (campaign.affiliate_rules or {}).get("settings") or {}
+    if not (cr.get("urgency_block") or camp_settings.get("urgency_block")) and not cr.get("social_proof"):
+        warnings.append("Нет urgency или social proof — можно добавить в Конверсию")
+    if not cr.get("faq_qa"):
+        warnings.append("Нет FAQ — можно сгенерировать при создании дорвея")
+    return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
 @router.get("/{doorway_id}", response_model=DoorwayResponse)
@@ -242,6 +259,87 @@ async def update_doorway(
     await db.commit()
     await db.refresh(doorway)
     return doorway
+
+
+class ApplyVariantRequest(BaseModel):
+    variant_index: int = 0
+
+
+@router.post("/{doorway_id}/add-variant")
+async def doorway_add_variant(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate new content variant with AI and add to content_variants."""
+    from app.services.generator import generate_doorway
+    from app.services.settings_helpers import get_user_openai_key
+
+    r = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    row = r.first()
+    if not row:
+        raise HTTPException(404, "Doorway not found")
+    dw, camp = row
+    keyword = (dw.title or "").split()[:3]
+    keyword = " ".join(keyword) if keyword else "займ"
+    try:
+        result = await generate_doorway(
+            db,
+            campaign_id=dw.campaign_id,
+            domain_id=dw.domain_id,
+            keyword=keyword,
+            path=dw.path or "/",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    variant = {
+        "title": result.get("title"),
+        "content": result.get("content"),
+        "meta_description": result.get("meta_description"),
+        "cta_text": "Оформить заявку",
+    }
+    variants = list(dw.content_variants or [])
+    variants.append(variant)
+    dw.content_variants = variants
+    await db.commit()
+    return {"status": "ok", "variant_index": len(variants) - 1}
+
+
+@router.post("/{doorway_id}/apply-variant")
+async def doorway_apply_variant(
+    doorway_id: int,
+    data: ApplyVariantRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Make variant at index primary (swap with current content)."""
+    r = await db.execute(
+        select(Doorway)
+        .join(Campaign)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    dw = r.scalar_one_or_none()
+    if not dw:
+        raise HTTPException(404, "Doorway not found")
+    variants = list(dw.content_variants or [])
+    if data.variant_index < 0 or data.variant_index >= len(variants):
+        raise HTTPException(400, "Invalid variant_index")
+    v = variants[data.variant_index]
+    snap = {"title": dw.title, "content": dw.content, "meta_description": dw.meta_description}
+    db.add(DoorwayVersion(doorway_id=dw.id, content_snapshot=snap))
+    dw.title = v.get("title", dw.title)
+    dw.content = v.get("content", dw.content)
+    dw.meta_description = v.get("meta_description", dw.meta_description)
+    if v.get("cta_text"):
+        cr = dict(dw.cloaking_rules or {})
+        cr["cta_by_device"] = {"desktop": v["cta_text"], "mobile": v.get("cta_mobile") or v["cta_text"]}
+        dw.cloaking_rules = cr
+    await db.commit()
+    return {"status": "ok", "message": f"Variant {data.variant_index} applied"}
 
 
 @router.delete("/{doorway_id}", status_code=204)

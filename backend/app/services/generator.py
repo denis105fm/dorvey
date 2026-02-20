@@ -18,6 +18,7 @@ async def generate_doorway(
     domain_id: int,
     keyword: str,
     path: str = "/",
+    generate_faq: bool = False,
 ) -> dict:
     """
     Generate doorway content via AI, validate, render HTML.
@@ -64,6 +65,16 @@ async def generate_doorway(
     )
     if not ok:
         data["validation_violations"] = violations
+
+    if generate_faq and openai_service.is_available(user_openai_key):
+        faq_qa = await openai_service.generate_faq(
+            keyword=keyword,
+            language=camp.language,
+            max_items=5,
+            api_key_override=user_openai_key,
+        )
+        if faq_qa:
+            data["faq_qa"] = faq_qa
 
     canonical = f"https://{dom.domain.rstrip('/')}{path}" if path != "/" else f"https://{dom.domain}"
     html = render_doorway_page(

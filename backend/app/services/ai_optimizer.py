@@ -244,3 +244,81 @@ JSON: {{"title":"...", "meta_description":"...", "content":"..."}}
 
     await db.commit()
     return True, "Авто-правка применена", updated
+
+
+async def copy_winner_to_doorway(
+    db: AsyncSession,
+    source_doorway_id: int,
+    target_doorway_id: int,
+    user_id: int,
+) -> tuple[bool, str]:
+    """
+    Copy content (title, content, meta_description) from winning doorway to target.
+    Both must belong to user's campaigns.
+    """
+    r = await db.execute(
+        select(Doorway, Campaign.user_id)
+        .join(Campaign)
+        .where(
+            Doorway.id.in_([source_doorway_id, target_doorway_id]),
+            Campaign.user_id == user_id,
+        )
+    )
+    rows = {row[0].id: (row[0], row[1]) for row in r.all()}
+    if source_doorway_id not in rows or target_doorway_id not in rows:
+        return False, "Doorway не найден или нет доступа"
+    src = rows[source_doorway_id][0]
+    tgt = rows[target_doorway_id][0]
+
+    # Save target version for rollback
+    snap = {
+        "title": tgt.title,
+        "content": tgt.content,
+        "meta_description": tgt.meta_description,
+    }
+    db.add(DoorwayVersion(doorway_id=tgt.id, content_snapshot=snap))
+
+    tgt.title = src.title
+    tgt.content = src.content
+    tgt.meta_description = src.meta_description
+    await db.commit()
+    return True, f"Контент скопирован с дорвея #{source_doorway_id}"
+
+
+async def get_best_doorway_by_cr(
+    db: AsyncSession,
+    campaign_id: int,
+    user_id: int,
+    min_clicks: int = 20,
+    days: int = 14,
+) -> Optional[int]:
+    """
+    Find doorway with best CR in campaign (min_clicks required).
+    Returns doorway_id or None.
+    """
+    since = datetime.utcnow() - timedelta(days=days)
+    subq = select(Doorway.id).join(Campaign).where(
+        Doorway.campaign_id == campaign_id, Campaign.user_id == user_id
+    )
+    r = await db.execute(
+        select(
+            DoorwayMetrics.doorway_id,
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clk"),
+            func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conv"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("rev"),
+        )
+        .where(
+            DoorwayMetrics.doorway_id.in_(subq),
+            DoorwayMetrics.date >= since,
+        )
+        .group_by(DoorwayMetrics.doorway_id)
+    )
+    candidates = []
+    for row in r.all():
+        if row.clk and row.clk >= min_clicks:
+            cr = (row.conv or 0) / row.clk * 100
+            candidates.append((row.doorway_id, cr, row.rev or 0, row.clk))
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda x: (x[1], x[2]))
+    return best[0]

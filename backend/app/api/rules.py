@@ -3,13 +3,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 
 from app.api.deps import CurrentUser
 from app.core.database import get_db
 from app.models.campaign import Campaign
 
 router = APIRouter()
+
+
+class ConversionSettings(BaseModel):
+    """Conversion UI: urgency, social_proof, exit_intent, cta_by_device (stored in affiliate_rules.settings)."""
+    urgency_block: Optional[dict[str, Any] | str] = None
+    social_proof: Optional[dict[str, Any] | str] = None
+    exit_intent: Optional[dict[str, Any]] = None
+    cta_by_device: Optional[dict[str, str]] = None
 
 
 class RulesBuilder(BaseModel):
@@ -73,6 +81,43 @@ async def update_rules(campaign_id: int, data: RulesBuilder, current_user: Curre
         rules["ai"]["rollback_threshold_percent"] = data.rollback_threshold_percent
     if data.auto_generate_enabled is not None:
         rules["auto_generate_enabled"] = data.auto_generate_enabled
+    c.affiliate_rules = rules
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.get("/campaign/{campaign_id}/conversion")
+async def get_conversion(campaign_id: int, current_user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    c = await _check(db, campaign_id, current_user.id)
+    if not c:
+        raise HTTPException(404, "Campaign not found")
+    settings = (c.affiliate_rules or {}).get("settings") or {}
+    return {
+        "urgency_block": settings.get("urgency_block"),
+        "social_proof": settings.get("social_proof"),
+        "exit_intent": settings.get("exit_intent"),
+        "cta_by_device": settings.get("cta_by_device"),
+    }
+
+
+@router.put("/campaign/{campaign_id}/conversion")
+async def update_conversion(campaign_id: int, data: ConversionSettings, current_user: CurrentUser, db: AsyncSession = Depends(get_db)):
+    c = await _check(db, campaign_id, current_user.id)
+    if not c:
+        raise HTTPException(404, "Campaign not found")
+    rules = dict(c.affiliate_rules or {})
+    if "settings" not in rules:
+        rules["settings"] = {}
+    settings = dict(rules["settings"])
+    if data.urgency_block is not None:
+        settings["urgency_block"] = data.urgency_block
+    if data.social_proof is not None:
+        settings["social_proof"] = data.social_proof
+    if data.exit_intent is not None:
+        settings["exit_intent"] = data.exit_intent
+    if data.cta_by_device is not None:
+        settings["cta_by_device"] = data.cta_by_device
+    rules["settings"] = settings
     c.affiliate_rules = rules
     await db.commit()
     return {"status": "ok"}

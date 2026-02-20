@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import api from "../api/client";
 import { Webhook, Settings as SettingsIcon, Send, Search, Shield, BarChart3, MousePointer, Palette, Bot, CreditCard, Smartphone } from "lucide-react";
 
@@ -20,8 +21,16 @@ type IntegrationsData = {
   clarity_project_id?: string | null;
   exit_intent_enabled?: boolean | null;
   trust_elements_enabled?: boolean | null;
+  click_tracking_enabled?: boolean | null;
+  api_base_url?: string | null;
+  visitor_capture_enabled?: boolean | null;
+  email_capture_enabled?: boolean | null;
+  vapid_public_key?: string | null;
+  vapid_private_key?: string | null;
   slack_webhook_url?: string | null;
   email_notifications_enabled?: boolean | null;
+  facebook_pixel_id?: string | null;
+  google_ads_id?: string | null;
 };
 
 export default function Settings() {
@@ -54,11 +63,11 @@ export default function Settings() {
   const saveIntegrationsMut = useMutation({
     mutationFn: (d: IntegrationsData) =>
       api.put("/settings/integrations/all", d).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "integrations"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["settings", "integrations"] }); toast.success("Интеграции сохранены"); },
   });
   const saveWhitelabelMut = useMutation({
     mutationFn: (d: typeof whitelabel) => api.put("/settings/whitelabel", d).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings", "whitelabel"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["settings", "whitelabel"] }); toast.success("Брендинг сохранён"); },
   });
 
   const { data: webhooks } = useQuery({
@@ -69,12 +78,12 @@ export default function Settings() {
   const addMut = useMutation({
     mutationFn: (d: { url: string; events: string[] }) =>
       api.post("/webhooks/", { url: d.url, events: d.events }).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["webhooks"] }); toast.success("Webhook добавлен"); },
   });
 
   const delMut = useMutation({
     mutationFn: (id: number) => api.delete(`/webhooks/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["webhooks"] }); toast.success("Webhook удалён"); },
   });
 
   const { data: billing } = useQuery({
@@ -176,7 +185,7 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Webhooks</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">
-            Отправляем POST с данными при событиях: doorway.deployed, doorway.conversion, doorway.rollback.
+            Отправляем POST с данными при событиях: doorway.deployed, doorway.conversion, doorway.rollback, doorway.anomaly (алерт при падении CR).
           </p>
           <div className="flex gap-4 mb-4">
             <input
@@ -391,6 +400,85 @@ export default function Settings() {
               />
               <span className="text-slate-300">Trust-элементы: иконки надёжности (Безопасно, Проверено)</span>
             </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={integrations.click_tracking_enabled ?? false}
+                onChange={(e) => setIntegrations((p) => ({ ...p, click_tracking_enabled: e.target.checked }))}
+                className="w-4 h-4 rounded border-slate-600 text-emerald-600 bg-slate-700 focus:ring-emerald-500"
+              />
+              <span className="text-slate-300">Клик-трекинг: CTA ведёт через /api/analytics/click, считаем клики</span>
+            </label>
+            <div>
+              <label className="block text-slate-400 text-sm mb-1">API Base URL (для клик-трекинга)</label>
+              <input
+                value={integrations.api_base_url ?? ""}
+                onChange={(e) => setIntegrations((p) => ({ ...p, api_base_url: e.target.value }))}
+                placeholder="https://your-api.example.com"
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+              <p className="text-slate-500 text-xs mt-1">URL вашего Dorvey API. Если пусто — CTA ведёт напрямую на оффер.</p>
+            </div>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={integrations.visitor_capture_enabled ?? false}
+                onChange={(e) => setIntegrations((p) => ({ ...p, visitor_capture_enabled: e.target.checked }))}
+                className="w-4 h-4 rounded border-slate-600 text-emerald-600 bg-slate-700 focus:ring-emerald-500"
+              />
+              <span className="text-slate-300">Захват посетителей: база по визитам/кликам для remarketing и push</span>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={integrations.email_capture_enabled ?? false}
+                onChange={(e) => setIntegrations((p) => ({ ...p, email_capture_enabled: e.target.checked }))}
+                className="w-4 h-4 rounded border-slate-600 text-emerald-600 bg-slate-700 focus:ring-emerald-500"
+              />
+              <span className="text-slate-300">Сбор email: форма на дорвеях для рассылок</span>
+            </label>
+            <div className="mt-3 pt-3 border-t border-slate-600">
+              <p className="text-slate-400 text-sm mb-2">VAPID ключи для Web Push (кнопка «Подписаться» на дорвеях)</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => api.post("/settings/vapid/generate").then(() => { toast.success("Ключи сгенерированы"); window.location.reload(); }).catch((e) => toast.error(e?.response?.data?.detail ?? "Ошибка"))}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm"
+                >
+                  Сгенерировать VAPID
+                </button>
+                {integrations.vapid_public_key && (
+                  <span className="text-emerald-400 text-sm">✓ Ключи настроены</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 size={20} className="text-emerald-400" />
+            <h2 className="text-lg font-medium text-white">Ретаргетинг (Facebook / Google)</h2>
+          </div>
+          <p className="text-slate-400 text-sm mb-4">Пиксели для создания аудиторий и ретаргетинга.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-slate-400 text-sm mb-1">Facebook Pixel ID</label>
+              <input
+                value={integrations.facebook_pixel_id ?? ""}
+                onChange={(e) => setIntegrations((p) => ({ ...p, facebook_pixel_id: e.target.value }))}
+                placeholder="123456789012345"
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-sm mb-1">Google Ads ID</label>
+              <input
+                value={integrations.google_ads_id ?? ""}
+                onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_id: e.target.value }))}
+                placeholder="AW-123456789"
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+            </div>
           </div>
         </div>
 

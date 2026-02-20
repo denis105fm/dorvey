@@ -3,7 +3,7 @@
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -25,11 +25,19 @@ INTEGRATION_KEYS = [
     "hotjar_site_id", "clarity_project_id",
     "exit_intent_enabled",
     "trust_elements_enabled",
+    "click_tracking_enabled",
+    "api_base_url",
+    "visitor_capture_enabled",
+    "email_capture_enabled",
+    "vapid_public_key",
+    "vapid_private_key",
     "slack_webhook_url",
     "email_notifications_enabled",
+    "facebook_pixel_id",
+    "google_ads_id",
 ]
 
-BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "email_notifications_enabled"}
+BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled"}
 
 WHITELABEL_KEYS = ["whitelabel_brand_name", "whitelabel_logo_url", "whitelabel_primary_color", "whitelabel_favicon_url"]
 STORAGE_KEYS = ["s3_endpoint_url", "s3_access_key", "s3_secret_key", "s3_bucket"]
@@ -57,7 +65,16 @@ class IntegrationsSettings(BaseModel):
     clarity_project_id: Optional[str] = None
     exit_intent_enabled: Optional[bool] = False
     trust_elements_enabled: Optional[bool] = False
+    click_tracking_enabled: Optional[bool] = False
+    api_base_url: Optional[str] = None
+    visitor_capture_enabled: Optional[bool] = False
+    email_capture_enabled: Optional[bool] = False
+    vapid_public_key: Optional[str] = None
+    vapid_private_key: Optional[str] = None
     slack_webhook_url: Optional[str] = None
+    email_notifications_enabled: Optional[bool] = False
+    facebook_pixel_id: Optional[str] = None
+    google_ads_id: Optional[str] = None
 
 
 @router.get("/integrations/all")
@@ -78,10 +95,48 @@ async def get_integrations(
     for k in INTEGRATION_KEYS:
         if k not in out:
             out[k] = None
+    if "vapid_private_key" in out and out.get("vapid_private_key"):
+        out["vapid_private_key"] = "***"  # Never expose private key to frontend
     for k in BOOL_KEYS:
         if k in out and isinstance(out.get(k), str):
             out[k] = str(out[k]).lower() == "true"
     return out
+
+
+@router.post("/vapid/generate")
+async def generate_vapid_keys(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate VAPID keys for Web Push and save to settings.
+    Public key: base64url (for browser PushManager.subscribe).
+    Private key: PEM (for pywebpush on server).
+    """
+    try:
+        from py_vapid import Vapid
+        from py_vapid.utils import b64urlencode
+        from cryptography.hazmat.primitives import serialization
+    except ImportError:
+        raise HTTPException(503, "py-vapid не установлен")
+    v = Vapid()
+    v.generate_keys()
+    priv_pem = v.private_pem().decode("utf-8")
+    pub_bytes = v.public_key.public_bytes(
+        serialization.Encoding.X962,
+        serialization.PublicFormat.UncompressedPoint,
+    )
+    pub_b64url = b64urlencode(pub_bytes)
+    if not pub_b64url or not priv_pem:
+        raise HTTPException(500, "Ошибка генерации ключей")
+    for key_name, val in [("vapid_public_key", pub_b64url), ("vapid_private_key", priv_pem)]:
+        r = await db.execute(select(Setting).where(Setting.user_id == current_user.id, Setting.key == key_name))
+        s = r.scalar_one_or_none()
+        if s:
+            s.value = val
+        else:
+            db.add(Setting(user_id=current_user.id, key=key_name, value=val))
+    await db.commit()
+    return {"status": "ok", "message": "VAPID ключи сгенерированы и сохранены"}
 
 
 @router.put("/integrations/all")

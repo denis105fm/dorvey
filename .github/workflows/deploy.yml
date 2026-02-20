@@ -37,7 +37,7 @@ jobs:
               git reset --hard origin/main
             fi
 
-            echo "Stopping containers (volumes preserved - do NOT use down -v)..."
+            echo "Stopping containers (volumes preserved - NEVER use down -v, DB would be lost)..."
             docker compose -f docker-compose.prod.yml down
 
             echo "Building and starting..."
@@ -57,3 +57,4 @@ jobs:
             curl -sS "http://localhost:8085/api/health" > /dev/null || true
 
             echo "Deploy done. DB data is in volume postgres_data (persists across deploys)."
+            echo "Migrations (009 visitor_events/push, 010 email_leads) run on backend start via: alembic upgrade head"

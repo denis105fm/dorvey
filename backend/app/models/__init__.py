@@ -10,6 +10,7 @@ from app.models.template import Template
 from app.models.offer import Offer
 from app.models.setting import Setting
 from app.models.webhook import Webhook
+from app.models.visitor import VisitorEvent, PushSubscription
 
 __all__ = [
     "User",
@@ -24,4 +25,6 @@ __all__ = [
     "Offer",
     "Setting",
     "Webhook",
+    "VisitorEvent",
+    "PushSubscription",
 ]

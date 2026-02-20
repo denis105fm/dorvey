@@ -2,14 +2,14 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 
-type Offer = { id: number; url: string; geo: string | null; device: string | null; priority: number; is_active: boolean };
+type Offer = { id: number; url: string; name?: string | null; rate?: string | null; amount?: string | null; term?: string | null; geo: string | null; device: string | null; priority: number; is_active: boolean };
 
 export default function Offers() {
   const qc = useQueryClient();
   const [campaignId, setCampaignId] = useState(1);
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [edit, setEdit] = useState<Offer | null>(null);
-  const [form, setForm] = useState({ url: "", geo: "", device: "", priority: 0, is_active: true });
+  const [form, setForm] = useState({ url: "", name: "", rate: "", amount: "", term: "", geo: "", device: "", priority: 0, is_active: true });
 
   const { data: offers, isLoading } = useQuery({
     queryKey: ["offers", campaignId],
@@ -22,8 +22,8 @@ export default function Offers() {
   });
 
   const createMut = useMutation({
-    mutationFn: (d: typeof form & { campaign_id: number }) => api.post("/offers/", { ...d, campaign_id: campaignId, geo: d.geo || undefined, device: d.device || undefined }).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["offers", campaignId] }); setModal(null); setForm({ url: "", geo: "", device: "", priority: 0, is_active: true }); },
+    mutationFn: (d: typeof form & { campaign_id: number }) => api.post("/offers/", { ...d, campaign_id: campaignId, name: d.name || undefined, rate: d.rate || undefined, amount: d.amount || undefined, term: d.term || undefined, geo: d.geo || undefined, device: d.device || undefined }).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["offers", campaignId] }); setModal(null); setForm({ url: "", name: "", rate: "", amount: "", term: "", geo: "", device: "", priority: 0, is_active: true }); },
   });
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<typeof form> }) => api.patch(`/offers/${id}`, { ...data, geo: data.geo || undefined, device: data.device || undefined }).then((r) => r.data),
@@ -36,7 +36,7 @@ export default function Offers() {
 
   const openEdit = (o: Offer) => {
     setEdit(o);
-    setForm({ url: o.url, geo: o.geo ?? "", device: o.device ?? "", priority: o.priority, is_active: o.is_active });
+    setForm({ url: o.url, name: o.name ?? "", rate: o.rate ?? "", amount: o.amount ?? "", term: o.term ?? "", geo: o.geo ?? "", device: o.device ?? "", priority: o.priority, is_active: o.is_active });
     setModal("edit");
   };
 
@@ -50,7 +50,7 @@ export default function Offers() {
             {campaigns?.map((c: { id: number; name: string }) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <button onClick={() => { setModal("create"); setForm({ url: "", geo: "", device: "", priority: 0, is_active: true }); }} className="mt-6 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium">Добавить оффер</button>
+        <button onClick={() => { setModal("create"); setForm({ url: "", name: "", rate: "", amount: "", term: "", geo: "", device: "", priority: 0, is_active: true }); }} className="mt-6 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium">Добавить оффер</button>
       </div>
       {isLoading ? (
         <p className="text-slate-400">Загрузка...</p>
@@ -61,6 +61,10 @@ export default function Offers() {
               <thead>
                 <tr className="border-b border-slate-700">
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">ID</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Название</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Ставка</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Сумма</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Срок</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">URL</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Geo</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Device</th>
@@ -73,6 +77,10 @@ export default function Offers() {
                 {offers.map((o: Offer) => (
                   <tr key={o.id} className="border-b border-slate-700/50">
                     <td className="px-4 py-3 text-white">{o.id}</td>
+                    <td className="px-4 py-3 text-slate-300">{o.name ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-400">{o.rate ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-400">{o.amount ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-400">{o.term ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-400 truncate max-w-xs">{o.url}</td>
                     <td className="px-4 py-3 text-slate-400">{o.geo ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-400">{o.device ?? "—"}</td>
@@ -99,7 +107,13 @@ export default function Offers() {
           <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-medium text-white mb-4">{modal === "create" ? "Новый оффер" : "Редактировать оффер"}</h2>
             <div className="space-y-3">
-              <input value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://..." className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+              <input value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} placeholder="URL оффера (https://...)" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+              <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Название (для таблицы сравнения)" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+              <div className="grid grid-cols-3 gap-2">
+                <input value={form.rate} onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))} placeholder="Ставка" className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                <input value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Сумма" className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                <input value={form.term} onChange={(e) => setForm((f) => ({ ...f, term: e.target.value }))} placeholder="Срок" className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+              </div>
               <input value={form.geo} onChange={(e) => setForm((f) => ({ ...f, geo: e.target.value }))} placeholder="Geo (RU, US...)" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <input value={form.device} onChange={(e) => setForm((f) => ({ ...f, device: e.target.value }))} placeholder="Device (mobile, desktop...)" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <input type="number" value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: parseInt(e.target.value) || 0 }))} placeholder="Приоритет" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />

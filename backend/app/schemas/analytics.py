@@ -44,3 +44,36 @@ class AnalyticsSummary(BaseModel):
     total_conversions: int
     total_revenue: float
     doorway_count: int
+    ctr_percent: float = 0
+    cr_percent: float = 0
+
+
+class DailyMetricsPoint(BaseModel):
+    date: str  # YYYY-MM-DD
+    impressions: int
+    clicks: int
+    conversions: int
+    revenue: float
+    ctr_percent: float = 0
+    cr_percent: float = 0
+
+
+class AnalyticsDailyResponse(BaseModel):
+    series: list[DailyMetricsPoint]
+
+
+class CampaignPerformance(BaseModel):
+    campaign_id: int
+    name: str
+    impressions: int
+    clicks: int
+    conversions: int
+    revenue: float
+    ctr_percent: float = 0
+    cr_percent: float = 0
+    roi_per_click: float = 0
+    doorway_count: int
+
+
+class AnalyticsCampaignsResponse(BaseModel):
+    campaigns: list[CampaignPerformance]
