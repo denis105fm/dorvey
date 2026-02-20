@@ -16,6 +16,7 @@ import SettingsPage from "./pages/Settings";
 import Offers from "./pages/Offers";
 import UsersPage from "./pages/Users";
 import Seo from "./pages/Seo";
+import Recommendations from "./pages/Recommendations";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuth();
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="servers" element={<Servers />} />
           <Route path="domains" element={<Domains />} />
           <Route path="analytics" element={<Analytics />} />
+          <Route path="recommendations" element={<Recommendations />} />
           <Route path="push-ads" element={<PushAds />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="offers" element={<Offers />} />

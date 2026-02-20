@@ -17,6 +17,9 @@ class OfferBase(BaseModel):
     device: Optional[str] = None
     priority: int = 0
     is_active: bool = True
+    description: Optional[str] = None
+    restrictions: Optional[str] = None
+    recommendations: Optional[str] = None
 
 
 class OfferCreate(OfferBase):
@@ -33,6 +36,9 @@ class OfferUpdate(BaseModel):
     device: Optional[str] = None
     priority: Optional[int] = None
     is_active: Optional[bool] = None
+    description: Optional[str] = None
+    restrictions: Optional[str] = None
+    recommendations: Optional[str] = None
 
 
 class OfferResponse(OfferBase):

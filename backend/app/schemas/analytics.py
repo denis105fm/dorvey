@@ -102,3 +102,4 @@ class DoorwayProfitMetric(BaseModel):
 class AnalyticsDoorwaysMetricsResponse(BaseModel):
     doorways: list[DoorwayProfitMetric]
     min_clicks_used: int
+    external_signals_by_country: dict | None = None  # гео -> { news, seasonality, sources_used }

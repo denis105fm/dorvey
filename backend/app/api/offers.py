@@ -1,8 +1,10 @@
 """Offers API - geo/device routing."""
 
+import csv
+import io
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -13,6 +15,43 @@ from app.models.campaign import Campaign
 from app.schemas.offer import OfferCreate, OfferUpdate, OfferResponse
 
 router = APIRouter()
+
+
+def _parse_zeydoo_csv(content: bytes, offer_url: str, campaign_id: int) -> list[dict]:
+    """Parse Zeydoo export CSV. Columns: Offer ID, Offer name, Conversion type, Geo, eCPM, PO, Platform, OS."""
+    reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig")))
+    rows = []
+    seen = set()
+    for row in reader:
+        # Normalize keys (strip quotes/spaces from header)
+        row = {k.strip().strip('"'): v for k, v in row.items()}
+        name = (row.get("Offer name") or "").strip() or None
+        geo_raw = (row.get("Geo") or "").strip()
+        geo = geo_raw.lower() if geo_raw else None
+        po = (row.get("PO") or "").strip().replace("$", "").strip()
+        rate = po if po else None
+        platform = (row.get("Platform") or "").strip().lower()
+        device = "mobile" if platform == "mobile" else ("desktop" if platform == "desktop" else None)
+        if not offer_url.strip():
+            continue
+        # One offer per geo row; skip duplicates (same geo+device)
+        key = (geo or "", device or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "campaign_id": campaign_id,
+            "url": offer_url.strip(),
+            "name": name,
+            "rate": rate,
+            "amount": None,
+            "term": None,
+            "geo": geo,
+            "device": device,
+            "priority": 0,
+            "is_active": True,
+        })
+    return rows
 
 
 async def _check(db: AsyncSession, campaign_id: int, user_id: int) -> bool:
@@ -63,3 +102,31 @@ async def delete_offer(offer_id: int, current_user: CurrentUser, db: AsyncSessio
     await db.delete(o)
     await db.commit()
     return None
+
+
+@router.post("/import")
+async def import_zeydoo_csv(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    campaign_id: int = Form(...),
+    offer_url: str = Form(..., description="Трекинг-ссылка оффера из Zeydoo (одна на все гео)"),
+    file: UploadFile = File(..., description="CSV из Zeydoo (Export to CSV со страницы оффера)"),
+):
+    """Импорт офферов из выгрузки Zeydoo (Export to CSV). По каждой строке (гео) создаётся оффер с указанным URL."""
+    if not await _check(db, campaign_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Нужен файл .csv")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Файл пустой")
+    try:
+        rows = _parse_zeydoo_csv(content, offer_url, campaign_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка разбора CSV: {e}")
+    if not rows:
+        raise HTTPException(status_code=400, detail="В CSV нет подходящих строк или не указан URL оффера")
+    for r in rows:
+        db.add(Offer(**r))
+    await db.commit()
+    return {"imported": len(rows)}
