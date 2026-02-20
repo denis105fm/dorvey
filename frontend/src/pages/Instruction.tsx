@@ -11,6 +11,17 @@ mermaid.initialize({
   securityLevel: "loose",
 });
 
+function slugify(text: string): string {
+  return String(text)
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/\./g, "")
+    .replace(/[^\p{L}\p{N}-]/gu, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 export default function Instruction() {
   const containerRef = useRef<HTMLDivElement>(null);
   const baseId = useId().replace(/:/g, "-");
@@ -60,12 +71,47 @@ export default function Instruction() {
     );
   }
 
+  const handleAnchorClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const href = (e.currentTarget as HTMLAnchorElement).getAttribute("href");
+    if (href?.startsWith("#") && href.length > 1) {
+      const id = href.slice(1);
+      const el = document.getElementById(id);
+      if (el) {
+        e.preventDefault();
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  };
+
+  const getHeadingText = (node: unknown, children: React.ReactNode): string => {
+    const n = node as { children?: Array<{ value?: string }> } | undefined;
+    const fromNode = n?.children?.map((c) => c.value ?? "").join("").trim();
+    if (fromNode) return fromNode;
+    const extract = (c: React.ReactNode): string =>
+      typeof c === "string" ? c : Array.isArray(c) ? c.map(extract).join("") : "";
+    return extract(children).trim();
+  };
+
+  const heading = (Tag: "h1" | "h2" | "h3" | "h4") =>
+    ({ node, children, ...props }: React.ComponentProps<"h1"> & { node?: unknown }) => {
+      const text = getHeadingText(node, children);
+      const id = slugify(text);
+      return id ? <Tag id={id} {...props}>{children}</Tag> : <Tag {...props}>{children}</Tag>;
+    };
+
   return (
-    <div ref={containerRef} className="max-w-4xl">
+    <div ref={containerRef} className="max-w-4xl scroll-smooth">
       <article className="prose prose-invert prose-slate max-w-none prose-headings:text-white prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-strong:text-white prose-code:bg-slate-700 prose-code:px-1 prose-code:rounded prose-pre:bg-slate-800 prose-pre:border prose-pre:border-slate-600">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
+            h1: heading("h1"),
+            h2: heading("h2"),
+            h3: heading("h3"),
+            h4: heading("h4"),
+            a: ({ href, children, ...props }) => (
+              <a href={href} onClick={handleAnchorClick} {...props}>{children}</a>
+            ),
             img: ({ src, alt }) => (
               <img src={src} alt={alt ?? ""} className="rounded-lg border border-slate-600 max-w-full h-auto" loading="lazy" />
             ),
