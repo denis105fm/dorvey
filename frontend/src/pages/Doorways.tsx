@@ -368,6 +368,28 @@ export default function Doorways() {
         </Select>
       </div>
 
+      {doorwaysMetrics?.external_signals_by_country && Object.keys(doorwaysMetrics.external_signals_by_country).length > 0 && (
+        <div className="mb-4 p-4 rounded-xl bg-slate-800/80 border border-slate-600">
+          <h3 className="text-sm font-medium text-violet-300 mb-2">Внешние данные по странам (гео офферов)</h3>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(doorwaysMetrics.external_signals_by_country).map(([country, sig]: [string, { news?: { headlines?: unknown[] }; seasonality?: unknown; sources_used?: string[] }]) => (
+              <div key={country} className="px-3 py-2 rounded-lg bg-slate-700/80 border border-slate-600 text-sm">
+                <span className="font-medium text-white uppercase">{country}</span>
+                {sig.sources_used?.length ? (
+                  <span className="text-slate-400 ml-2">источники: {sig.sources_used.join(", ")}</span>
+                ) : null}
+                {sig.news?.headlines?.length != null && sig.news.headlines.length > 0 ? (
+                  <span className="text-slate-400 ml-2">новости: {sig.news.headlines.length}</span>
+                ) : null}
+                {sig.seasonality != null && !("error" in (sig.seasonality as object)) ? (
+                  <span className="text-emerald-400 ml-2">сезонность</span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => (

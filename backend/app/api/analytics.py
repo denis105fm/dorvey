@@ -18,6 +18,7 @@ from app.core.database import get_db
 from app.models.doorway import Doorway, DoorwayMetrics
 from app.models.campaign import Campaign
 from app.models.setting import Setting
+from app.models.offer import Offer
 from app.schemas.analytics import (
     DoorwayMetricsCreate,
     DoorwayMetricsResponse,
@@ -917,4 +918,124 @@ async def get_analytics_doorways_metrics(
                 above_benchmark_roi=above_roi,
             )
         )
-    return AnalyticsDoorwaysMetricsResponse(doorways=result, min_clicks_used=min_clicks)
+
+    external_by_country = None
+    enabled, news_key, season_url = await _load_external_settings(db, current_user.id)
+    if enabled and (news_key or season_url):
+        geo_r = await db.execute(
+            select(Offer.geo).join(Campaign).where(Campaign.user_id == current_user.id, Offer.geo.isnot(None), Offer.geo != "")
+        )
+        geos = list({r[0].lower()[:2] for r in geo_r.all() if r[0]})[:20]
+        if geos:
+            from app.services.external_data_service import get_external_signals as fetch_signals
+            external_by_country = {}
+            for g in geos:
+                external_by_country[g] = await fetch_signals(country_code=g, days=days, news_api_key=news_key, seasonality_data_url=season_url)
+    return AnalyticsDoorwaysMetricsResponse(doorways=result, min_clicks_used=min_clicks, external_signals_by_country=external_by_country)
+
+
+async def _load_external_settings(db: AsyncSession, user_id: int) -> tuple[bool, str | None, str | None]:
+    r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == user_id,
+            Setting.key.in_(["news_api_key", "external_data_enabled", "seasonality_data_url"]),
+        )
+    )
+    rows = {s.key: s.value for s in r.scalars().all()}
+    enabled = (rows.get("external_data_enabled") or "").strip().lower() in ("true", "1")
+    news_key = (rows.get("news_api_key") or "").strip() or None
+    season_url = (rows.get("seasonality_data_url") or "").strip() or None
+    return enabled, news_key, season_url
+
+
+@router.get("/external-signals")
+async def get_external_signals_endpoint(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    country: str = Query(None, description="Single country code (e.g. us, de)"),
+    countries: str = Query(None, description="Comma-separated country codes for batch"),
+    days: int = Query(7, ge=1, le=90, description="Period in days"),
+):
+    """External data signals (news, seasonality). Single country or batch. Uses Settings → Внешние данные."""
+    enabled, news_key, season_url = await _load_external_settings(db, current_user.id)
+    if not enabled:
+        one = {"country": (country or "us").lower()[:2], "period_days": days, "sources_used": [], "news": None, "seasonality": None}
+        return {"by_country": {one["country"]: one}} if countries else one
+
+    from app.services.external_data_service import get_external_signals as fetch_signals
+    if countries:
+        codes = [c.strip().lower()[:2] for c in countries.split(",") if c.strip()]
+        if not codes:
+            codes = ["us"]
+        by_country = {}
+        for c in codes:
+            by_country[c] = await fetch_signals(country_code=c, days=days, news_api_key=news_key, seasonality_data_url=season_url)
+        return {"by_country": by_country, "period_days": days}
+    one = await fetch_signals(country_code=country or "us", days=days, news_api_key=news_key, seasonality_data_url=season_url)
+    return one
+
+
+@router.get("/offer-country-recommendations")
+async def get_offer_country_recommendations(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=1, le=365),
+):
+    """Рекомендации по странам: наши клики по гео + внешние сигналы. Для выбора «какие офферы/страны брать»."""
+    since = datetime.utcnow() - timedelta(days=days)
+    # Гео из офферов пользователя
+    geo_r = await db.execute(
+        select(Offer.geo, func.count(Offer.id).label("cnt"))
+        .join(Campaign)
+        .where(Campaign.user_id == current_user.id, Offer.geo.isnot(None), Offer.geo != "")
+        .group_by(Offer.geo)
+    )
+    geo_rows = geo_r.all()
+    if not geo_rows:
+        return {"recommendations": [], "period_days": days}
+
+    geos = [r[0].lower()[:2] for r in geo_rows if r[0]]
+    offer_count_by_geo = {r[0].lower()[:2]: r[1] for r in geo_rows if r[0]}
+
+    # Клики по гео из VisitorEvent (event_type=click, meta->geo)
+    from app.models.visitor import VisitorEvent
+    recommendations = []
+    for g in geos:
+        geo_expr = func.lower(func.coalesce(func.jsonb_extract_path_text(VisitorEvent.meta, "geo"), ""))
+        clk_r = await db.execute(
+            select(func.count(VisitorEvent.id))
+            .where(
+                VisitorEvent.campaign_id.in_(select(Campaign.id).where(Campaign.user_id == current_user.id)),
+                VisitorEvent.event_type == "click",
+                VisitorEvent.created_at >= since,
+                geo_expr == g,
+            )
+        )
+        our_clicks = clk_r.scalar() or 0
+        recommendations.append({"country": g, "offer_count": offer_count_by_geo.get(g, 0), "our_clicks": our_clicks})
+
+    # Внешние сигналы
+    enabled, news_key, season_url = await _load_external_settings(db, current_user.id)
+    if enabled and (news_key or season_url):
+        from app.services.external_data_service import get_external_signals as fetch_signals
+        for rec in recommendations:
+            g = rec["country"]
+            sig = await fetch_signals(country_code=g, days=days, news_api_key=news_key, seasonality_data_url=season_url)
+            rec["external_news_count"] = len(sig.get("news", {}).get("headlines") or [])
+            rec["external_seasonality"] = bool(sig.get("seasonality") and "error" not in (sig.get("seasonality") or {}))
+            rec["sources_used"] = sig.get("sources_used") or []
+            # Приоритет: наши клики + внешние данные
+            score = float(rec["our_clicks"]) * 0.02 + rec["external_news_count"] * 0.3 + (10 if rec["external_seasonality"] else 0)
+            rec["priority_score"] = round(score, 1)
+            rec["recommended"] = rec["offer_count"] > 0 and (rec["our_clicks"] > 0 or rec["external_news_count"] > 0 or rec["external_seasonality"])
+        recommendations.sort(key=lambda x: (-(x.get("priority_score") or 0), -x["our_clicks"]))
+    else:
+        for rec in recommendations:
+            rec["external_news_count"] = 0
+            rec["external_seasonality"] = False
+            rec["sources_used"] = []
+            rec["priority_score"] = float(rec["our_clicks"]) * 0.02
+            rec["recommended"] = rec["offer_count"] > 0 and rec["our_clicks"] > 0
+        recommendations.sort(key=lambda x: (-x["our_clicks"], -x["offer_count"]))
+
+    return {"recommendations": recommendations, "period_days": days}

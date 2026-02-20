@@ -21,6 +21,9 @@ class Offer(Base):
     device = Column(String(20), nullable=True)
     priority = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
+    description = Column(Text, nullable=True)
+    restrictions = Column(Text, nullable=True)
+    recommendations = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     campaign = relationship("Campaign", back_populates="offers")

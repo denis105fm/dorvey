@@ -8,6 +8,7 @@ const LABELS: Record<string, string> = {
   templates: "Шаблоны",
   keywords: "Ключевые слова",
   analytics: "Аналитика",
+  recommendations: "Рекомендации по офферам",
   "push-ads": "Push-реклама",
   servers: "Серверы",
   domains: "Домены",

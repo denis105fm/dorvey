@@ -36,9 +36,12 @@ INTEGRATION_KEYS = [
     "facebook_pixel_id",
     "google_ads_id",
     "min_clicks_for_profit",
+    "news_api_key",
+    "external_data_enabled",
+    "seasonality_data_url",
 ]
 
-BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled"}
+BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled", "external_data_enabled"}
 
 WHITELABEL_KEYS = ["whitelabel_brand_name", "whitelabel_logo_url", "whitelabel_primary_color", "whitelabel_favicon_url"]
 STORAGE_KEYS = ["s3_endpoint_url", "s3_access_key", "s3_secret_key", "s3_bucket"]
@@ -77,6 +80,9 @@ class IntegrationsSettings(BaseModel):
     facebook_pixel_id: Optional[str] = None
     google_ads_id: Optional[str] = None
     min_clicks_for_profit: Optional[int] = None  # порог кликов для учёта в доле прибыльных (по умолчанию 20)
+    news_api_key: Optional[str] = None
+    external_data_enabled: Optional[bool] = False
+    seasonality_data_url: Optional[str] = None
 
 
 @router.get("/integrations/all")

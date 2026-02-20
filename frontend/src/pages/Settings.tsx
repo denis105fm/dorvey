@@ -32,6 +32,9 @@ type IntegrationsData = {
   facebook_pixel_id?: string | null;
   google_ads_id?: string | null;
   min_clicks_for_profit?: number | null;
+  news_api_key?: string | null;
+  external_data_enabled?: boolean | null;
+  seasonality_data_url?: string | null;
 };
 
 const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
@@ -285,6 +288,56 @@ export default function Settings() {
 
         <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
+            <BarChart3 size={20} className="text-violet-400" />
+            <h2 className="text-lg font-medium text-white">Внешние данные для аналитики офферов</h2>
+          </div>
+          <p className="text-slate-400 text-sm mb-2">
+            Подключение внешних источников (новости по странам, тренды, сезонность) даёт более точный прогноз прибыльности оффера и рекомендации «какие офферы/страны брать».
+          </p>
+          <p className="text-slate-500 text-xs mb-3">
+            Подход: сначала подключаем большие полные наборы данных, потом дополняем новыми источниками по мере появления.
+          </p>
+          <label className="flex items-center gap-3 cursor-pointer mb-3">
+            <input
+              type="checkbox"
+              checked={integrations.external_data_enabled ?? false}
+              onChange={(e) => setIntegrations((p) => ({ ...p, external_data_enabled: e.target.checked }))}
+              className="w-4 h-4 rounded border-slate-600 text-violet-600 bg-slate-700 focus:ring-violet-500"
+            />
+            <span className="text-slate-300">Использовать внешние данные в аналитике (новости по странам, сезонность)</span>
+          </label>
+          <div className="grid grid-cols-1 gap-3 mb-3">
+            <div>
+              <label className="block text-slate-400 text-sm mb-1">NewsAPI.org API Key</label>
+              <input
+                value={integrations.news_api_key ?? ""}
+                onChange={(e) => setIntegrations((p) => ({ ...p, news_api_key: e.target.value }))}
+                placeholder="Ключ с newsapi.org (новости по странам)"
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-400 text-sm mb-1">URL данных сезонности (опционально)</label>
+              <input
+                value={integrations.seasonality_data_url ?? ""}
+                onChange={(e) => setIntegrations((p) => ({ ...p, seasonality_data_url: e.target.value }))}
+                placeholder="https://... JSON с коэффициентами по странам/месяцам"
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+            </div>
+          </div>
+          <div className="rounded-lg bg-slate-800/80 border border-slate-600 p-3 text-sm space-y-2">
+            <p className="text-slate-300 font-medium">Какие ещё источники подключать и как:</p>
+            <ul className="text-slate-400 list-disc list-inside space-y-1 text-xs">
+              <li><strong className="text-slate-300">Рынок по странам</strong> — REST Countries и подобные API; при наличии — отчёты по CPM/трендам (URL или ключ в настройках).</li>
+              <li><strong className="text-slate-300">Сезонность</strong> — свой JSON по гео/месяцу или внешний URL (поле выше).</li>
+              <li><strong className="text-slate-300">Дополнительно</strong> — полный каталог: <code className="bg-slate-700 px-1 rounded">docs/EXTERNAL_DATA_SOURCES.md</code> в репозитории.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="card-volumetric">
+          <div className="flex items-center gap-2 mb-4">
             <Send size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Уведомления</h2>
           </div>
@@ -420,8 +473,13 @@ export default function Settings() {
             <MousePointer size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Heatmaps</h2>
           </div>
-          <p className="text-slate-400 text-sm mb-4">Hotjar и Clarity — для вставки скриптов в шаблоны дорвеев.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <p className="text-slate-400 text-sm mb-2">
+            Укажите только ID — код скриптов вставляется в страницы дорвеев автоматически при деплое, писать ничего вручную не нужно.
+          </p>
+          <p className="text-slate-500 text-xs mb-4">
+            Hotjar: тепловые карты, записи сессий, опросы. Clarity (Microsoft): записи сессий, клики, прокрутка — бесплатно.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
             <input
               value={integrations.hotjar_site_id ?? ""}
               onChange={(e) => setIntegrations((p) => ({ ...p, hotjar_site_id: e.target.value }))}
@@ -435,6 +493,7 @@ export default function Settings() {
               className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
           </div>
+          <p className="text-slate-500 text-xs">Скрипты подставляются в страницы дорвеев автоматически при деплое.</p>
         </div>
 
         <div className="card-volumetric">
