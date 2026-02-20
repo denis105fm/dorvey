@@ -85,8 +85,8 @@ export default function Layout() {
                   <Link
                     key={to}
                     to={to}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                      isActive(to) ? "opacity-90" : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                      isActive(to) ? "opacity-90" : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 hover:translate-x-0.5"
                     }`}
                     style={isActive(to) ? { backgroundColor: `${primaryColor}20`, color: primaryColor } : {}}
                   >
@@ -117,7 +117,9 @@ export default function Layout() {
       </aside>
       <main className="flex-1 overflow-auto p-8 min-w-0">
         <Breadcrumbs />
-        <Outlet />
+        <div className="animate-fade-in-up" style={{ animationDuration: "0.3s" }}>
+          <Outlet />
+        </div>
       </main>
     </div>
   );

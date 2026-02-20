@@ -18,6 +18,7 @@ from app.services.ai_optimizer import (
     apply_recommendation,
     copy_winner_to_doorway,
     get_best_doorway_by_cr,
+    get_pause_recommendations,
 )
 from app.services.ml_predictor import predict_cr, detect_anomalies
 from app.services.traffic_mix import get_traffic_mix_recommendations
@@ -77,6 +78,19 @@ async def doorway_recommendations(
     if not await _check_access(db, doorway_id, current_user.id):
         raise HTTPException(status_code=404, detail="Doorway not found")
     return await get_recommendations(db, doorway_id, days=days)
+
+
+@router.get("/doorway/{doorway_id}/pause-recommendations")
+async def doorway_pause_recommendations(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(14, ge=7, le=90),
+):
+    """Рекомендации для дорвея на паузе: какой вариант A/B в кампании даёт лучший результат."""
+    if not await _check_access(db, doorway_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Doorway not found")
+    return await get_pause_recommendations(db, doorway_id, current_user.id, days=days)
 
 
 @router.post("/doorway/{doorway_id}/rollback")

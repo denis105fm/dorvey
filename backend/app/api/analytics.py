@@ -27,6 +27,8 @@ from app.schemas.analytics import (
     DailyMetricsPoint,
     AnalyticsCampaignsResponse,
     CampaignPerformance,
+    DoorwayProfitMetric,
+    AnalyticsDoorwaysMetricsResponse,
 )
 
 router = APIRouter()
@@ -620,6 +622,17 @@ async def get_core_web_vitals(
     return {"url": url, "cwv": result, "loadingExperience": loading}
 
 
+async def _get_min_clicks_for_profit(db: AsyncSession, user_id: int) -> int:
+    r = await db.execute(select(Setting).where(Setting.user_id == user_id, Setting.key == "min_clicks_for_profit"))
+    s = r.scalar_one_or_none()
+    if not s or not s.value:
+        return 20
+    try:
+        return max(1, int(s.value))
+    except (TypeError, ValueError):
+        return 20
+
+
 @router.get("/summary", response_model=AnalyticsSummary)
 async def get_analytics_summary(
     current_user: CurrentUser,
@@ -627,6 +640,7 @@ async def get_analytics_summary(
     days: int = Query(30, ge=1, le=365),
 ):
     since = datetime.utcnow() - timedelta(days=days)
+    min_clicks = await _get_min_clicks_for_profit(db, current_user.id)  # порог из настроек (по умолчанию 20)
     subq = select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)
     r = await db.execute(
         select(
@@ -648,6 +662,26 @@ async def get_analytics_summary(
     rev = float(row.revenue) if row and row.revenue is not None else 0
     ctr = (clk / imp * 100) if imp else 0
     cr = (conv / clk * 100) if clk else 0
+
+    # Доля прибыльных дорвеев: среди дорвеев с трафиком (>= MIN_CLICKS) за период — сколько с revenue > 0
+    r_profit = await db.execute(
+        select(
+            DoorwayMetrics.doorway_id,
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clk"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("rev"),
+        )
+        .select_from(DoorwayMetrics)
+        .where(DoorwayMetrics.doorway_id.in_(subq), DoorwayMetrics.date >= since)
+        .group_by(DoorwayMetrics.doorway_id)
+    )
+    with_traffic = [x for x in r_profit.all() if (x.clk or 0) >= min_clicks]
+    profitable = [x for x in with_traffic if (x.rev or 0) > 0]
+    doorways_with_traffic = len(with_traffic)
+    profitable_count = len(profitable)
+    profitable_pct = (
+        round(profitable_count / doorways_with_traffic * 100, 1) if doorways_with_traffic else 0.0
+    )
+
     return AnalyticsSummary(
         total_impressions=imp,
         total_clicks=clk,
@@ -656,6 +690,9 @@ async def get_analytics_summary(
         doorway_count=count,
         ctr_percent=round(ctr, 2),
         cr_percent=round(cr, 2),
+        profitable_doorways_percent=profitable_pct,
+        profitable_doorways_count=profitable_count,
+        doorways_with_traffic_count=doorways_with_traffic,
     )
 
 
@@ -763,3 +800,121 @@ async def get_analytics_campaigns(
             )
         )
     return AnalyticsCampaignsResponse(campaigns=campaigns)
+
+
+def _health_score(profit_status: str, clicks: int, revenue: float, conversions: int, min_clicks: int) -> int:
+    """Единый скоринг здоровья дорвея 0–100."""
+    if profit_status == "no_traffic":
+        return min(25, 5 + (clicks * 2) if clicks else 0)  # чуть выше если есть хоть какие-то клики
+    if profit_status == "unprofitable":
+        return 25 + min(25, int(clicks / max(min_clicks, 1) * 5))  # 25–50
+    # profitable
+    rev_per_click = revenue / clicks if clicks else 0
+    bonus = min(40, int(rev_per_click * 20))
+    return 60 + bonus  # 60–100
+
+
+def _profit_probability(profit_status: str, clicks: int, revenue: float, min_clicks: int) -> str:
+    """Прогноз вероятности прибыли: low / medium / high по метрикам за период."""
+    if profit_status == "profitable":
+        return "high"
+    if profit_status == "unprofitable":
+        return "low"
+    # no_traffic
+    if clicks >= min_clicks // 2 and clicks < min_clicks:
+        return "medium"  # есть трафик, но мало для вывода — может выйти в плюс
+    if clicks > 0:
+        return "medium"
+    return "low"
+
+
+@router.get("/doorways-metrics", response_model=AnalyticsDoorwaysMetricsResponse)
+async def get_analytics_doorways_metrics(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=1, le=365),
+):
+    """Метрики по каждому дорвею: клики, выручка, profit_status, health_score, profit_probability, бенчмарк по кампании."""
+    since = datetime.utcnow() - timedelta(days=days)
+    min_clicks = await _get_min_clicks_for_profit(db, current_user.id)
+    subq = select(Doorway.id, Doorway.campaign_id).join(Campaign).where(Campaign.user_id == current_user.id)
+    r = await db.execute(
+        select(
+            DoorwayMetrics.doorway_id,
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clk"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("rev"),
+            func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conv"),
+        )
+        .select_from(DoorwayMetrics)
+        .where(DoorwayMetrics.doorway_id.in_(select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)), DoorwayMetrics.date >= since)
+        .group_by(DoorwayMetrics.doorway_id)
+    )
+    rows = r.all()
+    # Все дорвеи пользователя с campaign_id
+    all_dw = await db.execute(subq)
+    dw_list = all_dw.all()  # (id, campaign_id)
+    dw_ids = {row[0] for row in dw_list}
+    dw_to_campaign = {row[0]: row[1] for row in dw_list}
+
+    # Бенчмарки по кампании: средний CR и ROI среди дорвеев с трафиком (>= min_clicks)
+    campaign_stats: dict[int, list[tuple[int, float, int]]] = {}  # campaign_id -> [(clk, rev, conv), ...]
+    for dw_id in dw_ids:
+        row = next((r for r in rows if r.doorway_id == dw_id), None)
+        clk = int(row.clk) if row else 0
+        rev = float(row.rev) if row else 0.0
+        conv = int(row.conv) if row else 0
+        cid = dw_to_campaign.get(dw_id)
+        if cid is None:
+            continue
+        if clk >= min_clicks:
+            campaign_stats.setdefault(cid, []).append((clk, rev, conv))
+    benchmarks: dict[int, tuple[float, float]] = {}  # campaign_id -> (avg_cr, avg_roi)
+    for cid, stats in campaign_stats.items():
+        total_clk = sum(s[0] for s in stats)
+        total_conv = sum(s[2] for s in stats)
+        total_rev = sum(s[1] for s in stats)
+        if total_clk:
+            benchmarks[cid] = (
+                round(total_conv / total_clk * 100, 2),
+                round(total_rev / total_clk, 4),
+            )
+
+    result = []
+    for dw_id in dw_ids:
+        row = next((r for r in rows if r.doorway_id == dw_id), None)
+        clk = int(row.clk) if row else 0
+        rev = float(row.rev) if row else 0.0
+        conv = int(row.conv) if row else 0
+        cid = dw_to_campaign.get(dw_id)
+        if clk < min_clicks:
+            status = "no_traffic"
+        elif rev > 0:
+            status = "profitable"
+        else:
+            status = "unprofitable"
+        health = _health_score(status, clk, rev, conv, min_clicks)
+        prob = _profit_probability(status, clk, rev, min_clicks)
+        b = benchmarks.get(cid)
+        bench_cr, bench_roi = (b[0], b[1]) if b else (None, None)
+        my_cr = (conv / clk * 100) if clk else 0
+        my_roi = (rev / clk) if clk else 0
+        above_cr = (my_cr > bench_cr) if bench_cr is not None and clk >= min_clicks else None
+        above_roi = (my_roi > bench_roi) if bench_roi is not None and clk >= min_clicks else None
+        result.append(
+            DoorwayProfitMetric(
+                doorway_id=dw_id,
+                clicks=clk,
+                revenue=round(rev, 2),
+                conversions=conv,
+                profit_status=status,
+                health_score=min(100, health),
+                min_clicks_used=min_clicks,
+                profit_probability=prob,
+                campaign_id=cid,
+                benchmark_cr=bench_cr,
+                benchmark_roi=bench_roi,
+                above_benchmark_cr=above_cr,
+                above_benchmark_roi=above_roi,
+            )
+        )
+    return AnalyticsDoorwaysMetricsResponse(doorways=result, min_clicks_used=min_clicks)

@@ -46,6 +46,10 @@ class AnalyticsSummary(BaseModel):
     doorway_count: int
     ctr_percent: float = 0
     cr_percent: float = 0
+    # Доля дорвеев с трафиком (>= min_clicks), которые приносят прибыль (revenue > 0)
+    profitable_doorways_percent: float = 0
+    profitable_doorways_count: int = 0
+    doorways_with_traffic_count: int = 0
 
 
 class DailyMetricsPoint(BaseModel):
@@ -77,3 +81,24 @@ class CampaignPerformance(BaseModel):
 
 class AnalyticsCampaignsResponse(BaseModel):
     campaigns: list[CampaignPerformance]
+
+
+class DoorwayProfitMetric(BaseModel):
+    doorway_id: int
+    clicks: int
+    revenue: float
+    conversions: int
+    profit_status: str  # "profitable" | "unprofitable" | "no_traffic"
+    health_score: int  # 0-100
+    min_clicks_used: int
+    profit_probability: str = "low"  # "low" | "medium" | "high" — прогноз вероятности прибыли
+    campaign_id: int | None = None
+    benchmark_cr: float | None = None  # средний CR по кампании (бенчмарк)
+    benchmark_roi: float | None = None  # средний revenue/click по кампании
+    above_benchmark_cr: bool | None = None
+    above_benchmark_roi: bool | None = None
+
+
+class AnalyticsDoorwaysMetricsResponse(BaseModel):
+    doorways: list[DoorwayProfitMetric]
+    min_clicks_used: int

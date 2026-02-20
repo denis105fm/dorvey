@@ -322,3 +322,62 @@ async def get_best_doorway_by_cr(
         return None
     best = max(candidates, key=lambda x: (x[1], x[2]))
     return best[0]
+
+
+async def get_pause_recommendations(
+    db: AsyncSession,
+    doorway_id: int,
+    user_id: int,
+    days: int = 14,
+    num_variants: int = 3,
+) -> List[dict]:
+    """
+    Рекомендации для дорвея на паузе: на основе прибыльных дорвеев кампании —
+    какой layout/вариант даёт лучший CR, предложить применить его.
+    """
+    from app.services.anti_detection import get_layout_variant
+
+    r = await db.execute(
+        select(Doorway, Domain, Campaign)
+        .join(Domain, Doorway.domain_id == Domain.id)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.id == doorway_id, Campaign.user_id == user_id)
+    )
+    row = r.first()
+    if not row:
+        return []
+    dw, dom, camp = row
+    if dw.status != "paused":
+        return [{"type": "info", "text": "Дорвей не на паузе. Рекомендации после паузы показываются для дорвеев со статусом «На паузе»."}]
+
+    ab = await get_ab_winner(db, camp.id, days=days, num_variants=num_variants)
+    if ab.get("winner") is None:
+        return [{"type": "info", "text": "Недостаточно данных по кампании для рекомендации (нужен трафик по вариантам A/B)."}]
+    winner_idx = ab["winner"]
+    winner_cr = ab.get("winner_cr") or 0
+    winner_revenue = ab.get("winner_revenue") or 0
+    domain = dom.domain or ""
+    path = (dw.path or "/").strip() or "/"
+    current_layout = get_layout_variant(domain, path, dw.id, num_variants)
+    variants = ab.get("variants") or []
+
+    suggestions = []
+    if current_layout != winner_idx:
+        suggestions.append({
+            "type": "suggestion",
+            "text": f"В кампании «{camp.name or camp.id}» лучший результат у варианта {winner_idx} (CR {winner_cr}%, выручка {winner_revenue:.2f}). Ваш дорвей сейчас на варианте {current_layout}. Рекомендуем применить вариант {winner_idx} в блоке A/B.",
+            "layout_index": winner_idx,
+            "winner_cr": winner_cr,
+            "winner_revenue": winner_revenue,
+        })
+    else:
+        suggestions.append({
+            "type": "info",
+            "text": f"Ваш дорвей уже использует вариант {winner_idx}, который в кампании даёт лучший CR ({winner_cr}%). Проверьте оффер и постбек.",
+        })
+    if variants:
+        suggestions.append({
+            "type": "data",
+            "variants": variants,
+        })
+    return suggestions
