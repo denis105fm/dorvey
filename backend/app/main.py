@@ -4,8 +4,10 @@ Backend FastAPI Application
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 
@@ -64,6 +66,21 @@ app.add_middleware(
 def health_check():
     """Health check endpoint."""
     return {"status": "ok", "version": "0.1.0"}
+
+
+def _instruction_path() -> Path:
+    """Path to docs/ИНСТРУКЦИЯ.md (project root = parent of backend)."""
+    backend_dir = Path(__file__).resolve().parent.parent
+    return backend_dir.parent / "docs" / "ИНСТРУКЦИЯ.md"
+
+
+@app.get("/api/docs/instruction", response_class=PlainTextResponse)
+def get_instruction():
+    """Return instruction markdown for in-app help."""
+    path = _instruction_path()
+    if not path.exists():
+        return PlainTextResponse(content="# Инструкция\n\nФайл инструкции не найден (docs/ИНСТРУКЦИЯ.md).", status_code=404)
+    return PlainTextResponse(content=path.read_text(encoding="utf-8"))
 
 
 # API Routes

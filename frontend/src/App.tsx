@@ -17,6 +17,7 @@ import Offers from "./pages/Offers";
 import UsersPage from "./pages/Users";
 import Seo from "./pages/Seo";
 import Recommendations from "./pages/Recommendations";
+import Instruction from "./pages/Instruction";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, isLoading } = useAuth();
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="offers" element={<Offers />} />
           <Route path="seo" element={<Seo />} />
+          <Route path="instruction" element={<Instruction />} />
           <Route path="users" element={<UsersPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
