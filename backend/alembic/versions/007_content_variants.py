@@ -6,7 +6,9 @@ Create Date: 2025-02-15
 
 """
 from alembic import op
+import sqlalchemy as sa
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "007"
 down_revision = "006"
@@ -15,7 +17,7 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("doorways", op.Column("content_variants", op.dialects.postgresql.JSONB(), nullable=True))
+    op.add_column("doorways", sa.Column("content_variants", JSONB(), nullable=True))
     op.execute(text("UPDATE doorways SET content_variants = '[]'::jsonb WHERE content_variants IS NULL"))
 
 
