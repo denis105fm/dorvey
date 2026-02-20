@@ -71,6 +71,7 @@ class DoorwayResponse(DoorwayBase):
     deployed_at: Optional[datetime] = None
     indexed_at: Optional[datetime] = None
     created_at: datetime
+    pause_reason: Optional[str] = None
 
     class Config:
         from_attributes = True

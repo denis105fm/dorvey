@@ -103,6 +103,7 @@ async def deploy_doorway(
     from datetime import datetime
     dw.status = "deployed"
     dw.deployed_at = datetime.utcnow()
+    dw.pause_reason = None
     await db.commit()
     try:
         from app.services.webhook_service import notify_webhooks

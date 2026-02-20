@@ -63,6 +63,17 @@ export default function Dashboard() {
     { label: "Конверсии (30д)", value: summary?.total_conversions ?? 0, icon: FileText, color: "emerald" },
     { label: "CR %", value: summary?.cr_percent != null ? `${summary.cr_percent}%` : "—", icon: FileText, color: "emerald" },
     { label: "Выручка (30д)", value: (summary?.total_revenue ?? 0).toFixed(2), icon: DollarSign, color: "violet" },
+    {
+      label: "Дорвеев с прибылью",
+      value:
+        summary?.doorways_with_traffic_count != null && summary.doorways_with_traffic_count > 0
+          ? `${summary.profitable_doorways_percent ?? 0}% (${summary.profitable_doorways_count ?? 0} из ${summary.doorways_with_traffic_count})`
+          : summary?.doorway_count
+            ? "— (нет трафика)"
+            : "—",
+      icon: BarChart3,
+      color: "emerald",
+    },
   ];
 
   return (
@@ -86,9 +97,9 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {cards.map(({ label, value, icon: Icon, color, to }) => (
-          <Link key={label} to={to}>
-            <div className="bg-slate-800/80 rounded-xl p-5 border border-slate-700 hover:border-slate-600 hover:shadow-cardHover transition-all cursor-pointer">
+        {cards.map(({ label, value, icon: Icon, color, to }, i) => (
+          <Link key={label} to={to} className="animate-fade-in-up" style={{ animationDelay: `${i * 50}ms` }}>
+            <div className="card-volumetric p-5 cursor-pointer h-full">
               <div className="flex items-center justify-between">
                 <span className="text-slate-400 text-sm">{label}</span>
                 <Icon className={CARD_COLORS[color]} size={24} />
@@ -99,15 +110,15 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <h2 className="text-lg font-semibold text-white mt-8 mb-4">Метрики за 30 дней</h2>
+      <h2 className="text-lg font-semibold text-white mt-8 mb-4 animate-fade-in-up" style={{ animationDelay: "150ms" }}>Метрики за 30 дней</h2>
       {summaryLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          {metrics.map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="bg-slate-800/80 rounded-xl p-5 border border-slate-700 shadow-card">
+          {metrics.map(({ label, value, icon: Icon, color }, i) => (
+            <div key={label} className="card-volumetric p-5 animate-scale-in" style={{ animationDelay: `${180 + i * 40}ms` }}>
               <div className="flex items-center justify-between">
                 <span className="text-slate-400 text-sm">{label}</span>
                 <Icon className={CARD_COLORS[color]} size={22} />
@@ -119,7 +130,7 @@ export default function Dashboard() {
       )}
 
       {campaignStats?.campaigns?.length > 0 && (
-        <div className="mt-8 bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="mt-8 card-volumetric animate-fade-in-up" style={{ animationDelay: "350ms" }}>
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 size={20} className="text-blue-400" />
             <h2 className="text-lg font-semibold text-white">Сводка по кампаниям (30 дней)</h2>
@@ -159,7 +170,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="mt-8 bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+      <div className="mt-8 card-volumetric animate-fade-in-up" style={{ animationDelay: "400ms" }}>
         <div className="flex items-center gap-2 mb-4">
           <Sparkles size={20} className="text-amber-400" />
           <h2 className="text-lg font-semibold text-white">Партнёрки для ниши</h2>
@@ -221,7 +232,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="mt-8 bg-slate-800/80 rounded-xl p-6 border border-slate-700 shadow-card">
+      <div className="mt-8 card-volumetric animate-fade-in-up" style={{ animationDelay: "450ms" }}>
         <div className="flex items-center gap-2 mb-4">
           <TrendingUp size={20} className="text-emerald-400" />
           <h2 className="text-lg font-semibold text-white">Добро пожаловать в Dorvey</h2>

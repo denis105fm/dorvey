@@ -8,11 +8,17 @@ import { Select } from "../components/ui/select";
 import { EmptyState } from "../components/ui/empty-state";
 import { Skeleton } from "../components/ui/skeleton";
 import { DropdownMenu, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { FileText, MoreVertical, ExternalLink, ChevronRight, ChevronLeft, Search, Layers, Plus, Check } from "lucide-react";
+import { FileText, MoreVertical, ExternalLink, ChevronRight, ChevronLeft, Search, Layers, Plus, Check, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 type Rec = { type: string; text: string };
 type ContentVariant = { title?: string; content?: string; meta_description?: string };
-type Doorway = { id: number; campaign_id: number; domain_id: number; path: string; title?: string; status: string; content_variants?: ContentVariant[] };
+type Doorway = { id: number; campaign_id: number; domain_id: number; path: string; title?: string; status: string; content_variants?: ContentVariant[]; pause_reason?: string | null };
+type DoorwayMetric = {
+  doorway_id: number; clicks: number; revenue: number; conversions: number;
+  profit_status: string; health_score: number; profit_probability?: string;
+  benchmark_cr?: number | null; benchmark_roi?: number | null;
+  above_benchmark_cr?: boolean | null; above_benchmark_roi?: boolean | null;
+};
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Черновик",
@@ -38,6 +44,7 @@ export default function Doorways() {
   const [variantsDoorwayId, setVariantsDoorwayId] = useState<number | null>(null);
   const [filterCampaign, setFilterCampaign] = useState<string>("");
   const [filterDomain, setFilterDomain] = useState<string>("");
+  const [filterProfit, setFilterProfit] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
 
@@ -53,18 +60,30 @@ export default function Doorways() {
     queryKey: ["domains"],
     queryFn: () => api.get("/domains/").then((r) => r.data),
   });
+  const { data: doorwaysMetrics } = useQuery({
+    queryKey: ["analytics-doorways-metrics", 30],
+    queryFn: () => api.get("/analytics/doorways-metrics", { params: { days: 30 } }).then((r) => r.data),
+  });
+  const metricsByDoorway = useMemo(() => {
+    const map = new Map<number, DoorwayMetric>();
+    (doorwaysMetrics?.doorways ?? []).forEach((m: DoorwayMetric) => map.set(m.doorway_id, m));
+    return map;
+  }, [doorwaysMetrics]);
 
   const filtered = useMemo(() => {
     if (!doorways) return [];
     let list = doorways as Doorway[];
     if (filterCampaign) list = list.filter((d) => String(d.campaign_id) === filterCampaign);
     if (filterDomain) list = list.filter((d) => String(d.domain_id) === filterDomain);
+    if (filterProfit) {
+      list = list.filter((d) => (metricsByDoorway.get(d.id)?.profit_status ?? "no_traffic") === filterProfit);
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((d) => (d.path || "").toLowerCase().includes(q) || (d.title || "").toLowerCase().includes(q));
     }
     return list;
-  }, [doorways, filterCampaign, filterDomain, searchQuery]);
+  }, [doorways, filterCampaign, filterDomain, filterProfit, searchQuery, metricsByDoorway]);
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE) || 1;
   const paginated = useMemo(
@@ -109,10 +128,19 @@ export default function Doorways() {
     },
     onError: () => toast.error("Ошибка отката"),
   });
+  const recsDoorway = useMemo(
+    () => (doorways as Doorway[] | undefined)?.find((d) => d.id === recsDoorwayId),
+    [doorways, recsDoorwayId]
+  );
   const { data: recs } = useQuery({
     queryKey: ["recommendations", recsDoorwayId],
     queryFn: () => api.get(`/optimizer/doorway/${recsDoorwayId}/recommendations?days=14`).then((r) => r.data),
     enabled: !!recsDoorwayId,
+  });
+  const { data: pauseRecs } = useQuery({
+    queryKey: ["pause-recommendations", recsDoorwayId],
+    queryFn: () => api.get(`/optimizer/doorway/${recsDoorwayId}/pause-recommendations?days=14`).then((r) => r.data),
+    enabled: !!recsDoorwayId && recsDoorway?.status === "paused",
   });
   const applyRecMut = useMutation({
     mutationFn: ({ id, rec }: { id: number; rec: Rec }) =>
@@ -120,6 +148,7 @@ export default function Doorways() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["doorways"] });
       qc.invalidateQueries({ queryKey: ["recommendations", recsDoorwayId] });
+      qc.invalidateQueries({ queryKey: ["pause-recommendations", recsDoorwayId] });
       toast.success("Рекомендация применена");
     },
   });
@@ -210,7 +239,7 @@ export default function Doorways() {
       </div>
 
       {showGenerate && (
-        <div className="mb-6 p-6 bg-slate-800/80 rounded-xl border border-slate-700 shadow-card">
+        <div className="mb-6 card-volumetric p-6 animate-scale-in">
           <div className="flex items-center gap-2 mb-6">
             {[1, 2, 3].map((s) => (
               <span key={s} className="flex items-center gap-1">
@@ -313,7 +342,7 @@ export default function Doorways() {
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row gap-4 mb-4">
+      <div className="flex flex-col sm:flex-row gap-4 mb-4 transition-all duration-200">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
           <Input
@@ -331,6 +360,12 @@ export default function Doorways() {
           <option value="">Все домены</option>
           {domains?.map((d: { id: number; domain: string }) => <option key={d.id} value={d.id}>{d.domain}</option>)}
         </Select>
+        <Select value={filterProfit} onChange={(e) => { setFilterProfit(e.target.value); setPage(1); }} className="w-full sm:w-44">
+          <option value="">Прибыльность: все</option>
+          <option value="profitable">Прибыльные</option>
+          <option value="unprofitable">Убыточные</option>
+          <option value="no_traffic">Без трафика</option>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -347,7 +382,7 @@ export default function Doorways() {
           action={<Button onClick={() => setShowGenerate(true)}>Сгенерировать</Button>}
         />
       ) : (
-        <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden shadow-card">
+        <div className="card-volumetric overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -355,26 +390,80 @@ export default function Doorways() {
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">ID</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Кампания</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Путь</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Здоровье</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Статус</th>
                   <th className="text-right px-4 py-3 text-slate-400 font-medium">Действия</th>
                 </tr>
               </thead>
               <tbody>
-                {paginated.map((d: Doorway) => {
+                {paginated.map((d: Doorway, idx: number) => {
                   const liveUrl = getLiveUrl(d);
+                  const metric = metricsByDoorway.get(d.id);
+                  const health = metric?.health_score ?? 0;
+                  const profitStatus = metric?.profit_status ?? "no_traffic";
+                  const profitLabel = profitStatus === "profitable" ? "Прибыльный" : profitStatus === "unprofitable" ? "Убыточный" : "Без трафика";
+                  const profitColor = profitStatus === "profitable" ? "text-emerald-400" : profitStatus === "unprofitable" ? "text-amber-400" : "text-slate-500";
                   return (
-                    <tr key={d.id} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                    <tr
+                      key={d.id}
+                      className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-all duration-200 animate-fade-in-up"
+                      style={{ animationDelay: `${Math.min(idx * 40, 200)}ms` }}
+                    >
                       <td className="px-4 py-3 text-white font-mono text-sm">{d.id}</td>
                       <td className="px-4 py-3 text-slate-400">{campaignName(d.campaign_id)}</td>
                       <td className="px-4 py-3 text-white">{d.path || "/"}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          d.status === "deployed" || d.status === "indexed" ? "bg-emerald-500/20 text-emerald-400" :
-                          d.status === "paused" ? "bg-amber-500/20 text-amber-400" :
-                          "bg-slate-600 text-slate-300"
-                        }`}>
-                          {STATUS_LABELS[d.status] ?? d.status}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all duration-200 shrink-0"
+                              style={{
+                                borderColor: health >= 60 ? "#34d399" : health >= 35 ? "#fbbf24" : "#64748b",
+                                color: health >= 60 ? "#34d399" : health >= 35 ? "#fbbf24" : "#94a3b8",
+                              }}
+                              title={`Скоринг: ${health}/100`}
+                            >
+                              {health}
+                            </div>
+                            <div className="min-w-0">
+                              <span className={`text-xs font-medium ${profitColor}`}>
+                                {profitStatus === "profitable" && <TrendingUp size={12} className="inline mr-0.5" />}
+                                {profitStatus === "unprofitable" && <TrendingDown size={12} className="inline mr-0.5" />}
+                                {profitStatus === "no_traffic" && <Minus size={12} className="inline mr-0.5" />}
+                                {profitLabel}
+                              </span>
+                              {metric?.profit_probability && (
+                                <span className="block text-[10px] text-slate-500 mt-0.5">
+                                  Вероятность прибыли: {metric.profit_probability === "high" ? "высокая" : metric.profit_probability === "medium" ? "средняя" : "низкая"}
+                                </span>
+                              )}
+                              {(metric?.above_benchmark_cr != null || metric?.above_benchmark_roi != null) && (
+                                <span
+                                  className="block text-[10px] text-slate-500 mt-0.5 cursor-help"
+                                  title={`Сравнение с средним по кампании. CR — конверсия (%), RPC — выручка на клик. ↑ выше бенчмарка, ↓ ниже.${metric?.benchmark_cr != null ? ` Бенчмарк CR: ${metric.benchmark_cr}%.` : ""}${metric?.benchmark_roi != null ? ` Бенчмарк RPC: ${metric.benchmark_roi}` : ""}`}
+                                >
+                                  Бенчмарк: CR {metric?.above_benchmark_cr === true ? "↑" : metric?.above_benchmark_cr === false ? "↓" : "—"} RPC {metric?.above_benchmark_roi === true ? "↑" : metric?.above_benchmark_roi === false ? "↓" : "—"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`px-2 py-1 rounded text-xs font-medium inline-flex w-fit ${
+                            d.status === "deployed" || d.status === "indexed" ? "bg-emerald-500/20 text-emerald-400" :
+                            d.status === "paused" ? "bg-amber-500/20 text-amber-400" :
+                            "bg-slate-600 text-slate-300"
+                          }`}>
+                            {STATUS_LABELS[d.status] ?? d.status}
+                          </span>
+                          {d.status === "paused" && d.pause_reason && (
+                            <span className="text-slate-500 text-xs max-w-[220px] truncate" title={d.pause_reason}>
+                              {d.pause_reason}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -547,25 +636,41 @@ export default function Doorways() {
 
       {recsDoorwayId && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setRecsDoorwayId(null)}>
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-5 max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-5 max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-medium text-white mb-3 flex justify-between">
               <span>Рекомендации — дорвей #{recsDoorwayId}</span>
               <button onClick={() => setRecsDoorwayId(null)} className="text-slate-400 hover:text-white">✕</button>
             </h2>
-            {recs?.length ? (
-              <ul className="space-y-3">
-                {recs.map((r: Rec, i: number) => (
-                  <li key={i} className="flex items-start justify-between gap-3 p-2 bg-slate-700/50 rounded-lg">
-                    <span className="text-slate-300 text-sm">{r.text}</span>
-                    <Button size="sm" onClick={() => applyRecMut.mutate({ id: recsDoorwayId!, rec: r })} disabled={applyRecMut.isPending || r.type === "info"}>
-                      {r.type === "info" ? "—" : "Применить"}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-slate-400 text-sm">Загрузка или нет рекомендаций...</p>
+            {recsDoorway?.status === "paused" && Array.isArray(pauseRecs) && pauseRecs.length > 0 && (
+              <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl shadow-lg animate-scale-in" title="Рекомендации построены по прибыльным дорвеям этой кампании">
+                <p className="text-amber-400 text-xs font-medium mb-2">По данным кампании (дорвей на паузе)</p>
+                <ul className="space-y-2">
+                  {pauseRecs.map((pr: { type: string; text: string; layout_index?: number; winner_cr?: number }, i: number) => (
+                    <li key={i} className="text-slate-300 text-sm">{pr.text}</li>
+                  ))}
+                </ul>
+                <p className="text-slate-500 text-xs mt-3">RPC — выручка на клик. Примените лучший вариант в меню «Варианты A/B» для этого дорвея.</p>
+              </div>
             )}
+            {recs?.length ? (
+              <>
+                {recsDoorway?.status === "paused" && pauseRecs?.length ? <p className="text-slate-400 text-xs mb-2">Рекомендации AI</p> : null}
+                <ul className="space-y-3">
+                  {recs.map((r: Rec, i: number) => (
+                    <li key={i} className="flex items-start justify-between gap-3 p-2 bg-slate-700/50 rounded-lg">
+                      <span className="text-slate-300 text-sm">{r.text}</span>
+                      <Button size="sm" onClick={() => applyRecMut.mutate({ id: recsDoorwayId!, rec: r })} disabled={applyRecMut.isPending || r.type === "info"}>
+                        {r.type === "info" ? "—" : "Применить"}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : recs === undefined && !pauseRecs?.length ? (
+              <p className="text-slate-400 text-sm">Загрузка...</p>
+            ) : !recs?.length ? (
+              <p className="text-slate-400 text-sm">Нет AI-рекомендаций</p>
+            ) : null}
           </div>
         </div>
       )}

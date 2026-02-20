@@ -31,12 +31,27 @@ type IntegrationsData = {
   email_notifications_enabled?: boolean | null;
   facebook_pixel_id?: string | null;
   google_ads_id?: string | null;
+  min_clicks_for_profit?: number | null;
 };
+
+const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
+  { value: "doorway.deployed", label: "Деплой дорвея" },
+  { value: "doorway.conversion", label: "Конверсия" },
+  { value: "doorway.rollback", label: "Откат" },
+  { value: "doorway.anomaly", label: "Аномалия (падение CR)" },
+  { value: "doorway.auto_paused", label: "Авто-пауза (убыточный дорвей)" },
+];
 
 export default function Settings() {
   const qc = useQueryClient();
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookEvents] = useState<string[]>(["doorway.deployed", "doorway.conversion"]);
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(["doorway.deployed", "doorway.conversion", "doorway.auto_paused"]);
+
+  const toggleWebhookEvent = (event: string) => {
+    setWebhookEvents((prev) =>
+      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]
+    );
+  };
 
   const [integrations, setIntegrations] = useState<IntegrationsData>({});
   const [whitelabel, setWhitelabel] = useState<{
@@ -118,7 +133,7 @@ export default function Settings() {
     <div>
       <h1 className="text-2xl font-bold text-white mb-6">Настройки</h1>
       <div className="space-y-8">
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Palette size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">White-label</h2>
@@ -161,7 +176,7 @@ export default function Settings() {
           </button>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Bot size={20} className="text-violet-400" />
             <h2 className="text-lg font-medium text-white">OpenAI (AI)</h2>
@@ -179,37 +194,54 @@ export default function Settings() {
           <p className="text-slate-500 text-xs">Можно также задать OPENAI_API_KEY в .env (глобально для сервера)</p>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Webhook size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Webhooks</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">
-            Отправляем POST с данными при событиях: doorway.deployed, doorway.conversion, doorway.rollback, doorway.anomaly (алерт при падении CR).
+            Выберите события и укажите URL — при наступлении события отправится POST с данными.
           </p>
+          <div className="mb-4">
+            <p className="text-slate-400 text-xs font-medium mb-2">События для нового webhook</p>
+            <div className="flex flex-wrap gap-3">
+              {WEBHOOK_EVENT_OPTIONS.map((opt) => (
+                <label key={opt.value} className="flex items-center gap-2 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={webhookEvents.includes(opt.value)}
+                    onChange={() => toggleWebhookEvent(opt.value)}
+                    className="w-4 h-4 rounded border-slate-600 text-emerald-600 bg-slate-700 focus:ring-emerald-500 focus:ring-offset-0 transition-transform group-hover:scale-105"
+                  />
+                  <span className="text-slate-300 text-sm group-hover:text-white transition-colors">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="flex gap-4 mb-4">
             <input
               value={webhookUrl}
               onChange={(e) => setWebhookUrl(e.target.value)}
               placeholder="https://your-server.com/webhook"
-              className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              className="flex-1 px-3 py-2 bg-slate-700/80 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all"
             />
             <button
               onClick={() => addMut.mutate({ url: webhookUrl, events: webhookEvents })}
-              disabled={!webhookUrl.trim() || addMut.isPending}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm"
+              disabled={!webhookUrl.trim() || addMut.isPending || webhookEvents.length === 0}
+              className="btn-lift px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-all duration-200"
             >
               Добавить
             </button>
           </div>
           {webhooks?.length ? (
             <div className="space-y-2">
-              {webhooks.map((w: { id: number; url: string; events: string[] }) => (
-                <div key={w.id} className="flex items-center justify-between py-2 border-b border-slate-700">
-                  <code className="text-slate-300 text-sm">{w.url}</code>
+              {webhooks.map((w: { id: number; url: string; events: string[] }, i: number) => (
+                <div key={w.id} className="flex items-center justify-between py-3 px-3 rounded-lg bg-slate-700/40 border border-slate-600/50 hover:border-slate-500 transition-all duration-200 animate-fade-in-up" style={{ animationDelay: `${i * 30}ms` }}>
+                  <code className="text-slate-300 text-sm truncate flex-1 mr-3">{w.url}</code>
+                  <span className="text-slate-500 text-xs shrink-0 mr-2">{w.events?.length ?? 0} событий</span>
                   <button
                     onClick={() => delMut.mutate(w.id)}
-                    className="text-red-400 hover:underline text-sm"
+                    className="text-red-400 hover:text-red-300 hover:underline text-sm transition-colors"
                   >
                     Удалить
                   </button>
@@ -221,7 +253,37 @@ export default function Settings() {
           )}
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart3 size={20} className="text-amber-400" />
+            <h2 className="text-lg font-medium text-white">Аналитика и прибыльность</h2>
+          </div>
+          <p className="text-slate-400 text-sm mb-4">
+            Порог кликов за период: дорвеи с меньшим числом кликов не учитываются в доле «прибыльных» на дашборде.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-slate-300 text-sm">Минимум кликов для учёта в статистике прибыльности</label>
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={integrations.min_clicks_for_profit ?? 20}
+              onChange={(e) =>
+                setIntegrations((p) => ({
+                  ...p,
+                  min_clicks_for_profit: Math.max(1, Math.min(500, parseInt(e.target.value, 10) || 20)),
+                }))
+              }
+              className="w-24 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
+            />
+            <span className="text-slate-500 text-sm">(по умолчанию 20)</span>
+          </div>
+          <p className="text-slate-500 text-xs mt-2">
+            Сохраните интеграции внизу страницы, чтобы применить.
+          </p>
+        </div>
+
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Send size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Уведомления</h2>
@@ -260,7 +322,7 @@ export default function Settings() {
           </div>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Search size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Google Search Console</h2>
@@ -289,7 +351,7 @@ export default function Settings() {
           </div>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Search size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Bing Webmaster</h2>
@@ -303,7 +365,7 @@ export default function Settings() {
           />
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Shield size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">SSL</h2>
@@ -319,7 +381,7 @@ export default function Settings() {
           </label>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Voluum / Binom</h2>
@@ -353,7 +415,7 @@ export default function Settings() {
           </div>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <MousePointer size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Heatmaps</h2>
@@ -375,7 +437,7 @@ export default function Settings() {
           </div>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <MousePointer size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Конверсия</h2>
@@ -454,7 +516,7 @@ export default function Settings() {
           </div>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Ретаргетинг (Facebook / Google)</h2>
@@ -486,13 +548,13 @@ export default function Settings() {
           <button
             onClick={() => saveIntegrationsMut.mutate(integrations)}
             disabled={saveIntegrationsMut.isPending}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-medium"
+            className="btn-lift px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-medium transition-all"
           >
             {saveIntegrationsMut.isPending ? "Сохранение…" : "Сохранить интеграции"}
           </button>
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <CreditCard size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Billing</h2>
@@ -519,7 +581,7 @@ export default function Settings() {
           )}
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <Smartphone size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">2FA (двухфакторная аутентификация)</h2>
@@ -550,7 +612,7 @@ export default function Settings() {
           )}
         </div>
 
-        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+        <div className="card-volumetric">
           <div className="flex items-center gap-2 mb-4">
             <SettingsIcon size={20} className="text-emerald-400" />
             <h2 className="text-lg font-medium text-white">Cron</h2>

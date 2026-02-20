@@ -110,6 +110,10 @@ async def run_auto_pause_unprofitable(
         row = r2.first()
         if row and row.rev is not None and row.rev < min_revenue and (row.clk or 0) >= 20:
             dw.status = "paused"
+            dw.pause_reason = (
+                "Мало выручки за период при достаточном трафике (≥20 кликов). "
+                "Включите постбек или проверьте оффер."
+            )
             paused += 1
             try:
                 from app.services.webhook_service import notify_webhooks

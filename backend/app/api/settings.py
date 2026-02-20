@@ -35,6 +35,7 @@ INTEGRATION_KEYS = [
     "email_notifications_enabled",
     "facebook_pixel_id",
     "google_ads_id",
+    "min_clicks_for_profit",
 ]
 
 BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled"}
@@ -75,6 +76,7 @@ class IntegrationsSettings(BaseModel):
     email_notifications_enabled: Optional[bool] = False
     facebook_pixel_id: Optional[str] = None
     google_ads_id: Optional[str] = None
+    min_clicks_for_profit: Optional[int] = None  # порог кликов для учёта в доле прибыльных (по умолчанию 20)
 
 
 @router.get("/integrations/all")
@@ -100,6 +102,13 @@ async def get_integrations(
     for k in BOOL_KEYS:
         if k in out and isinstance(out.get(k), str):
             out[k] = str(out[k]).lower() == "true"
+    if "min_clicks_for_profit" in out and out["min_clicks_for_profit"] is not None:
+        try:
+            out["min_clicks_for_profit"] = int(out["min_clicks_for_profit"])
+        except (TypeError, ValueError):
+            out["min_clicks_for_profit"] = 20
+    elif "min_clicks_for_profit" in out:
+        out["min_clicks_for_profit"] = 20
     return out
 
 
@@ -149,7 +158,10 @@ async def set_integrations(
     for key, val in d.items():
         if key not in INTEGRATION_KEYS:
             continue
-        v = json.dumps(val) if isinstance(val, bool) else (val or "")
+        if key == "min_clicks_for_profit" and val is not None:
+            v = str(int(val))
+        else:
+            v = json.dumps(val) if isinstance(val, bool) else (val or "")
         r = await db.execute(
             select(Setting).where(Setting.user_id == current_user.id, Setting.key == key)
         )

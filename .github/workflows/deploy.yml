@@ -57,4 +57,4 @@ jobs:
             curl -sS "http://localhost:8085/api/health" > /dev/null || true
 
             echo "Deploy done. DB data is in volume postgres_data (persists across deploys)."
-            echo "Migrations (009 visitor_events/push, 010 email_leads) run on backend start via: alembic upgrade head"
+            echo "Migrations run on backend start via CMD: alembic upgrade head (incl. 011 pause_reason)"
