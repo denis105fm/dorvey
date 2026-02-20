@@ -84,5 +84,97 @@ class OpenAIService:
                 "content": f"<h1>{keyword}</h1><p>Информация по запросу {keyword}.</p>",
             }
 
+    async def generate_faq(
+        self,
+        *,
+        keyword: str,
+        language: str = "ru",
+        max_items: int = 5,
+        api_key_override: Optional[str] = None,
+    ) -> list[dict[str, str]]:
+        """Generate 3-5 Q&A pairs for PAA/FAQ schema (People Also Ask). Returns list of {question, answer}."""
+        client = self.get_client_for_key(api_key_override)
+        system_prompt = f"""Ты — SEO-копирайтер. Создаёшь короткие вопросы и ответы для блока "Часто спрашивают" (FAQ) на странице.
+Язык: {language}. Тема: запрос пользователя.
+
+Правила: вопросы — как в поиске (People Also Ask). Ответы — 1-3 предложения, по делу. Без рекламы.
+Ответ — только валидный JSON массив: [{{"question": "...", "answer": "..."}}, ...]
+Минимум 3, максимум {max_items} пар."""
+
+        user_prompt = f'Тема/ключевой запрос: "{keyword}"'
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.5,
+        )
+        text = (response.choices[0].message.content or "[]").strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            text = parts[1][4:] if len(parts) > 1 and parts[1].startswith("json") else parts[1]
+        try:
+            arr = json.loads(text)
+            if not isinstance(arr, list):
+                return []
+            out = []
+            for item in arr[:max_items]:
+                if isinstance(item, dict) and item.get("question") and item.get("answer"):
+                    out.append({"question": str(item["question"])[:200], "answer": str(item["answer"])[:500]})
+            return out
+        except json.JSONDecodeError:
+            return []
+
+    async def generate_affiliate_recommendations(
+        self,
+        *,
+        keyword: str,
+        language: str = "ru",
+        region: str = "RU",
+        max_items: int = 5,
+        api_key_override: Optional[str] = None,
+    ) -> list[dict]:
+        """Recommend 3-5 affiliate networks for the niche. Returns list of {name, network, why, priority}."""
+        client = self.get_client_for_key(api_key_override)
+        system_prompt = f"""Ты — эксперт по партнёрскому маркетингу в РФ/СНГ. Рекомендуешь партнёрские сети (CPA-сети, офферы) для ниши.
+Язык: {language}. Регион: {region}.
+
+Правила: называй реальные сети (LeadGid, Admitad, M1-shop, ePN, Actionpay, Advertur, RichLeads, CPA.RBC и др.). Кратко — почему подходят для ниши.
+Ответ — только валидный JSON массив: [{{"name": "название оффера/программы", "network": "название партнёрской сети", "why": "почему подходит", "priority": 1-5}}]
+Минимум 3, максимум {max_items} элементов. priority=1 — лучший вариант."""
+
+        user_prompt = f'Ниша/ключевое слово: "{keyword}"'
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+        text = (response.choices[0].message.content or "[]").strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            text = parts[1][4:] if len(parts) > 1 and parts[1].startswith("json") else parts[1]
+        try:
+            arr = json.loads(text)
+            if not isinstance(arr, list):
+                return []
+            out = []
+            for item in arr[:max_items]:
+                if isinstance(item, dict) and item.get("network"):
+                    out.append({
+                        "name": str(item.get("name", item.get("network", "")))[:100],
+                        "network": str(item.get("network", ""))[:80],
+                        "why": str(item.get("why", ""))[:300],
+                        "priority": int(item.get("priority", 3)) if isinstance(item.get("priority"), (int, float)) else 3,
+                    })
+            return sorted(out, key=lambda x: x.get("priority", 5))
+        except json.JSONDecodeError:
+            return []
+
 
 openai_service = OpenAIService()

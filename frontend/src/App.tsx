@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./hooks/useAuth";
 import Layout from "./components/Layout";
+import ThemeInit from "./components/ThemeInit";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import Campaigns from "./pages/Campaigns";
@@ -10,6 +11,7 @@ import Keywords from "./pages/Keywords";
 import Servers from "./pages/Servers";
 import Domains from "./pages/Domains";
 import Analytics from "./pages/Analytics";
+import PushAds from "./pages/PushAds";
 import SettingsPage from "./pages/Settings";
 import Offers from "./pages/Offers";
 import UsersPage from "./pages/Users";
@@ -32,6 +34,7 @@ export default function App() {
           path="/"
           element={
             <ProtectedRoute>
+              <ThemeInit />
               <Layout />
             </ProtectedRoute>
           }
@@ -44,6 +47,7 @@ export default function App() {
           <Route path="servers" element={<Servers />} />
           <Route path="domains" element={<Domains />} />
           <Route path="analytics" element={<Analytics />} />
+          <Route path="push-ads" element={<PushAds />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="offers" element={<Offers />} />
           <Route path="seo" element={<Seo />} />

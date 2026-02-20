@@ -1,6 +1,7 @@
 """Indexing API: sitemap, GSC, Bing."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -111,3 +112,51 @@ async def submit_doorway(
         "gsc": {"submitted": gsc_ok, "message": gsc_msg},
         "bing": {"submitted": bing_ok, "message": bing_msg},
     }
+
+
+class GscFetchRequest(BaseModel):
+    domain_id: int
+    site_url: str  # GSC property: sc-domain:example.com or https://example.com/
+    days: int = 28
+
+
+@router.post("/gsc-fetch")
+async def fetch_gsc_data(
+    data: GscFetchRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fetch impressions/clicks from GSC Search Analytics API and import into DoorwayMetrics.
+    Requires GSC credentials in settings. site_url: GSC property (sc-domain:example.com or https://example.com/)
+    """
+    r = await db.execute(
+        select(Domain).where(Domain.id == data.domain_id)
+    )
+    dom = r.scalar_one_or_none()
+    if not dom:
+        raise HTTPException(404, "Domain not found")
+    r2 = await db.execute(
+        select(Doorway).join(Campaign).where(
+            Doorway.domain_id == data.domain_id,
+            Campaign.user_id == current_user.id,
+        )
+    )
+    if not r2.first():
+        raise HTTPException(403, "Access denied to domain")
+    cred_r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == current_user.id,
+            Setting.key.in_(["gsc_client_id", "gsc_client_secret", "gsc_refresh_token"]),
+        )
+    )
+    creds = {s.key: (s.value or "").strip() for s in cred_r.scalars().all()}
+    if not all(creds.get(k) for k in ["gsc_client_id", "gsc_client_secret", "gsc_refresh_token"]):
+        raise HTTPException(400, "GSC credentials not configured in Settings")
+    from app.services.gsc_fetch import import_gsc_to_doorway_metrics
+    result = await import_gsc_to_doorway_metrics(
+        db, current_user.id, data.domain_id, data.site_url,
+        creds["gsc_client_id"], creds["gsc_client_secret"], creds["gsc_refresh_token"],
+        days=min(data.days, 90),
+    )
+    return {"status": "ok", **result}

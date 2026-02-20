@@ -12,7 +12,7 @@ from app.models.campaign import Campaign
 from app.models.domain import Domain
 from app.models.setting import Setting
 from app.models.server import Server
-from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, run_certbot_ssl
+from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl
 
 router = APIRouter()
 
@@ -70,6 +70,17 @@ async def deploy_doorway(
         )
     if not ok:
         raise HTTPException(status_code=500, detail=f"Deploy failed: {msg}")
+    # Deploy service worker for push (when visitor capture may be used)
+    if getattr(srv, "auth_type", None) != "ftp":
+        set_vis = await db.execute(
+            select(Setting).where(
+                Setting.user_id == current_user.id,
+                Setting.key == "visitor_capture_enabled",
+            )
+        )
+        vis_row = set_vis.scalar_one_or_none()
+        if vis_row and str(vis_row.value or "").lower() == "true":
+            deploy_sw_push(srv, srv.path or "/var/www/html")
     # SSL auto (Let's Encrypt) — only for SSH deploy
     if getattr(srv, "auth_type", None) != "ftp":
         set_r = await db.execute(

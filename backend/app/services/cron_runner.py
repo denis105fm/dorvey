@@ -248,14 +248,40 @@ async def run_pause_on_affiliate_issues(
     return {"paused": paused}
 
 
+async def run_anomaly_alerts(db: AsyncSession, days: int = 14) -> dict:
+    """Detect anomalies and send notifications (Telegram/Slack/Email)."""
+    from app.services.ml_predictor import detect_anomalies
+    from app.services.webhook_service import notify_webhooks
+
+    r = await db.execute(select(Campaign.user_id).distinct())
+    user_ids = [row[0] for row in r.all()]
+    total_notified = 0
+    for uid in user_ids:
+        anomalies = await detect_anomalies(db, uid, days=days)
+        for a in anomalies:
+            try:
+                await notify_webhooks(db, uid, "doorway.anomaly", {
+                    "doorway_id": a["doorway_id"],
+                    "type": a["type"],
+                    "severity": a.get("severity", "medium"),
+                    "message": a.get("message", ""),
+                })
+                total_notified += 1
+            except Exception:
+                pass
+    return {"anomalies_notified": total_notified}
+
+
 async def run_all(db: AsyncSession) -> dict:
     """Run all daily cron tasks."""
+    r0 = await run_anomaly_alerts(db, days=14)
     r1 = await run_auto_rollback(db, threshold_percent=15, min_days=7)
     r2 = await run_auto_pause_unprofitable(db, min_revenue=0, min_days=14)
     r3 = await run_auto_switch_offers(db, threshold_percent=15, min_days=7)
     r4 = await run_pause_on_affiliate_issues(db, min_conversions_drop_percent=50, min_days=7)
     return {
         "status": "ok",
+        "anomaly_alerts": r0,
         "auto_rollback": r1,
         "auto_pause_unprofitable": r2,
         "auto_switch_offers": r3,

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
+import { Globe } from "lucide-react";
 
 type Domain = { id: number; domain: string; server_id: number; campaign_id: number | null; status: string };
 
@@ -86,7 +87,16 @@ export default function Domains() {
               </tbody>
             </table>
           ) : (
-            <div className="p-8 text-center text-slate-400">Пока нет доменов</div>
+            <div className="p-8 text-center">
+              <div className="rounded-full bg-slate-700/50 w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                <Globe className="text-slate-500" size={32} strokeWidth={1.5} />
+              </div>
+              <p className="text-slate-400">Пока нет доменов</p>
+              <p className="text-slate-500 text-sm mt-1">Добавьте домен для деплоя дорвеев</p>
+              <button onClick={() => setModal("create")} className="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm">
+                Добавить домен
+              </button>
+            </div>
           )}
         </div>
       )}

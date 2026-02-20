@@ -50,7 +50,7 @@ def deploy_doorway_async(doorway_id: int):
     from app.models.server import Server
     from app.models.setting import Setting
     from app.models.campaign import Campaign
-    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl
+    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push
     from datetime import datetime
 
     async def run():
@@ -80,12 +80,16 @@ def deploy_doorway_async(doorway_id: int):
                     set_r = await db.execute(
                         select(Setting).where(
                             Setting.user_id == camp.user_id,
-                            Setting.key == "ssl_auto_enabled",
+                            Setting.key.in_(["ssl_auto_enabled", "visitor_capture_enabled"]),
                         )
                     )
-                    ssl_set = set_r.scalar_one_or_none()
-                    if ssl_set and str(ssl_set.value or "").lower() == "true":
+                    settings_map = {s.key: s for s in set_r.scalars().all()}
+                    ssl_s = settings_map.get("ssl_auto_enabled")
+                    if ssl_s and str(ssl_s.value or "").lower() == "true":
                         run_certbot_ssl(srv, dom.domain, srv.path or "/var/www/html")
+                    vis_s = settings_map.get("visitor_capture_enabled")
+                    if vis_s and str(vis_s.value or "").lower() == "true":
+                        deploy_sw_push(srv, srv.path or "/var/www/html")
             dw.status = "deployed"
             dw.deployed_at = datetime.utcnow()
             await db.commit()
@@ -117,7 +121,8 @@ def deploy_batch_with_stagger(
     from app.models.domain import Domain
     from app.models.server import Server
     from app.models.campaign import Campaign
-    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl
+    from app.models.setting import Setting
+    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push
     from datetime import datetime
 
     cfg = StaggerConfig(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)
@@ -156,12 +161,16 @@ def deploy_batch_with_stagger(
                         set_r = await db.execute(
                             select(Setting).where(
                                 Setting.user_id == camp.user_id,
-                                Setting.key == "ssl_auto_enabled",
+                                Setting.key.in_(["ssl_auto_enabled", "visitor_capture_enabled"]),
                             )
                         )
-                        ssl_set = set_r.scalar_one_or_none()
-                        if ssl_set and str(ssl_set.value or "").lower() == "true":
+                        settings_map = {s.key: s for s in set_r.scalars().all()}
+                        ssl_s = settings_map.get("ssl_auto_enabled")
+                        if ssl_s and str(ssl_s.value or "").lower() == "true":
                             run_certbot_ssl(srv, dom.domain, srv.path or "/var/www/html")
+                        vis_s = settings_map.get("visitor_capture_enabled")
+                        if vis_s and str(vis_s.value or "").lower() == "true":
+                            deploy_sw_push(srv, srv.path or "/var/www/html")
                 dw.status = "deployed"
                 dw.deployed_at = datetime.utcnow()
                 results.append({"doorway_id": dw_id, "ok": True, "msg": msg})

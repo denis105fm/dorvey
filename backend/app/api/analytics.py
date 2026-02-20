@@ -1,9 +1,13 @@
 """Analytics API: metrics, postback, summary."""
 
+import json
 from datetime import datetime, timedelta
 from typing import List
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -19,6 +23,10 @@ from app.schemas.analytics import (
     DoorwayMetricsResponse,
     PostbackRequest,
     AnalyticsSummary,
+    AnalyticsDailyResponse,
+    DailyMetricsPoint,
+    AnalyticsCampaignsResponse,
+    CampaignPerformance,
 )
 
 router = APIRouter()
@@ -87,6 +95,25 @@ async def upsert_doorway_metrics(
     return m
 
 
+# Bot filter: track postbacks per doorway per minute
+import time
+_postback_cache: dict[tuple[int, int], int] = {}
+def _check_postback_rate(doorway_id: int, max_per_minute: int = 20) -> bool:
+    """Return True if postback should be accepted (not suspected bot)."""
+    now_min = int(time.time() // 60)
+    key = (doorway_id, now_min)
+    count = _postback_cache.get(key, 0)
+    if count >= max_per_minute:
+        return False
+    _postback_cache[key] = count + 1
+    # Cleanup keys older than 5 min
+    cutoff = int(time.time() // 60) - 5
+    for k in list(_postback_cache):
+        if k[1] < cutoff:
+            del _postback_cache[k]
+    return True
+
+
 @router.post("/postback")
 @router.get("/postback")
 async def postback(
@@ -97,11 +124,14 @@ async def postback(
     """
     Postback from affiliate network. sub_id = doorway_id.
     GET: ?sub_id=123&payout=10.5  or  POST with same query params.
+    Bot filter: rejects if > 20 postbacks/min per doorway.
     """
     try:
         doorway_id = int(sub_id or "0")
     except ValueError:
         return {"status": "ignored", "reason": "invalid sub_id"}
+    if doorway_id > 0 and not _check_postback_rate(doorway_id):
+        return {"status": "ignored", "reason": "rate_limit_suspected_bot"}
     if doorway_id <= 0:
         return {"status": "ignored", "reason": "sub_id required"}
     r = await db.execute(select(Doorway).where(Doorway.id == doorway_id))
@@ -174,6 +204,382 @@ async def postback(
     return {"status": "ok", "doorway_id": doorway_id}
 
 
+def _append_sub_id(url: str, doorway_id: int) -> str:
+    """Add sub_id=doorway_id to URL."""
+    if not url or doorway_id <= 0:
+        return url
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    qs["sub_id"] = [str(doorway_id)]
+    return urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
+
+
+# 1x1 transparent GIF for visit pixel
+_PIXEL_GIF = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x01D\x00;"
+
+
+@router.get("/visit")
+async def visit_pixel(
+    dw: int = Query(..., alias="dw", description="doorway_id"),
+    vid: str | None = Query(None, alias="vid", description="visitor_id from localStorage"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Track page visit for remarketing. Returns 1x1 transparent GIF. No auth."""
+    from fastapi.responses import Response
+    from app.models.visitor import VisitorEvent
+
+    if vid and len(vid) <= 64 and vid.replace("-", "").replace("_", "").isalnum():
+        r = await db.execute(select(Doorway).where(Doorway.id == dw))
+        door = r.scalar_one_or_none()
+        if door:
+            ev = VisitorEvent(visitor_id=vid, doorway_id=dw, campaign_id=door.campaign_id, event_type="visit")
+            db.add(ev)
+            await db.commit()
+    return Response(content=_PIXEL_GIF, media_type="image/gif")
+
+
+@router.get("/click")
+async def click_redirect(
+    dw: int = Query(..., alias="dw", description="doorway_id"),
+    vid: str | None = Query(None, alias="vid", description="visitor_id for remarketing"),
+    geo: str | None = Query(None, description="Country code for GEO offer routing"),
+    device: str | None = Query(None, description="mobile|desktop for device offer routing"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Click tracking: redirect to affiliate URL with sub_id, increment DoorwayMetrics.clicks.
+    Use as CTA href when click_tracking_enabled and api_base_url are set.
+    """
+    doorway_id = dw
+    r = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.id == doorway_id)
+    )
+    row = r.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Doorway not found")
+    door, camp = row
+    aff_url = camp.affiliate_url
+    if not aff_url:
+        raise HTTPException(status_code=400, detail="No affiliate URL")
+    from app.models.offer import Offer
+    off_r = await db.execute(
+        select(Offer)
+        .where(Offer.campaign_id == camp.id, Offer.is_active == True)
+        .order_by(Offer.priority.desc())
+    )
+    offers_list = [{"url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in off_r.scalars().all()]
+    if offers_list:
+        from app.services.deploy import _get_best_offer_url
+        best = _get_best_offer_url(offers_list, geo=geo, device=device)
+        if best:
+            aff_url = best
+    target = _append_sub_id(aff_url, doorway_id)
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    r2 = await db.execute(
+        select(DoorwayMetrics).where(
+            DoorwayMetrics.doorway_id == doorway_id,
+            DoorwayMetrics.date >= today,
+            DoorwayMetrics.date < today + timedelta(days=1),
+        )
+    )
+    m = r2.scalar_one_or_none()
+    if m:
+        m.clicks = (m.clicks or 0) + 1
+    else:
+        m = DoorwayMetrics(doorway_id=doorway_id, date=today, clicks=1)
+        db.add(m)
+    if vid and len(vid) <= 64 and vid.replace("-", "").replace("_", "").isalnum():
+        from app.models.visitor import VisitorEvent
+        ev = VisitorEvent(
+            visitor_id=vid, doorway_id=doorway_id, campaign_id=camp.id,
+            event_type="click", meta={"geo": geo, "device": device},
+        )
+        db.add(ev)
+    await db.commit()
+    return RedirectResponse(url=target, status_code=302)
+
+
+class EmailCaptureRequest(BaseModel):
+    email: str
+    visitor_id: str | None = None
+    doorway_id: int
+
+
+class PushSubscribeRequest(BaseModel):
+    visitor_id: str
+    doorway_id: int
+    subscription: dict
+
+
+@router.post("/push-subscribe")
+async def push_subscribe(
+    data: PushSubscribeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Save web push subscription for remarketing. No auth (called from page)."""
+    from app.models.visitor import PushSubscription, VisitorEvent
+
+    if len(data.visitor_id) > 64 or not data.visitor_id.replace("-", "").replace("_", "").replace(".", "").isalnum():
+        raise HTTPException(400, "Invalid visitor_id")
+    r = await db.execute(
+        select(Doorway).where(Doorway.id == data.doorway_id)
+    )
+    dw = r.scalar_one_or_none()
+    if not dw:
+        raise HTTPException(404, "Doorway not found")
+    sub = PushSubscription(
+        visitor_id=data.visitor_id,
+        doorway_id=data.doorway_id,
+        campaign_id=dw.campaign_id,
+        subscription=data.subscription,
+    )
+    db.add(sub)
+    ev = VisitorEvent(
+        visitor_id=data.visitor_id,
+        doorway_id=data.doorway_id,
+        campaign_id=dw.campaign_id,
+        event_type="push_subscribe",
+    )
+    db.add(ev)
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/email-capture")
+async def email_capture(
+    data: EmailCaptureRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Save email lead for remarketing. No auth (called from page)."""
+    import re
+    from app.models.visitor import EmailLead
+
+    email = (data.email or "").strip().lower()
+    if not email or len(email) > 255:
+        raise HTTPException(400, "Invalid email")
+    if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
+        raise HTTPException(400, "Invalid email format")
+    if data.visitor_id and (len(data.visitor_id) > 64 or not data.visitor_id.replace("-", "").replace("_", "").replace(".", "").isalnum()):
+        raise HTTPException(400, "Invalid visitor_id")
+    r = await db.execute(select(Doorway).where(Doorway.id == data.doorway_id))
+    dw = r.scalar_one_or_none()
+    if not dw:
+        raise HTTPException(404, "Doorway not found")
+    lead = EmailLead(
+        email=email,
+        visitor_id=data.visitor_id or None,
+        doorway_id=data.doorway_id,
+        campaign_id=dw.campaign_id,
+    )
+    db.add(lead)
+    await db.commit()
+    return {"status": "ok"}
+
+
+class SendPushRequest(BaseModel):
+    campaign_id: int | None = None
+    doorway_id: int | None = None
+    title: str
+    body: str
+    url: str | None = None
+
+
+@router.post("/send-push")
+async def send_push(
+    data: SendPushRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send push notification to all subscribers of campaign or doorway."""
+    from app.models.visitor import PushSubscription
+
+    if not data.campaign_id and not data.doorway_id:
+        raise HTTPException(400, "campaign_id or doorway_id required")
+    subq = select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)
+    if data.campaign_id:
+        subq = subq.where(Doorway.campaign_id == data.campaign_id)
+    if data.doorway_id:
+        subq = subq.where(Doorway.id == data.doorway_id)
+    subq = subq.scalar_subquery()
+    r = await db.execute(
+        select(PushSubscription).where(PushSubscription.doorway_id.in_(subq))
+    )
+    subs = r.scalars().all()
+    if not subs:
+        return {"status": "ok", "sent": 0, "message": "Нет подписок"}
+    set_r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == current_user.id,
+            Setting.key == "vapid_private_key",
+        )
+    )
+    priv_row = set_r.scalar_one_or_none()
+    if not priv_row or not priv_row.value:
+        raise HTTPException(400, "VAPID ключи не настроены. Сгенерируйте в Настройках.")
+    try:
+        from pywebpush import webpush
+    except ImportError:
+        raise HTTPException(503, "pywebpush не установлен")
+    payload = {"title": data.title, "body": data.body, "url": data.url or "/"}
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    vapid_priv = priv_row.value
+    claims = {"sub": "mailto:admin@dorvey.local"}
+
+    def _send_one(sub_info: dict) -> bool:
+        try:
+            webpush(
+                subscription_info=sub_info,
+                data=payload_json,
+                vapid_private_key=vapid_priv,
+                vapid_claims=claims,
+            )
+            return True
+        except Exception:
+            return False
+
+    sent = 0
+    for s in subs:
+        ok = await asyncio.to_thread(_send_one, s.subscription)
+        if ok:
+            sent += 1
+    return {"status": "ok", "sent": sent, "total": len(subs)}
+
+
+@router.get("/email-leads")
+async def get_email_leads(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(90, ge=1, le=365),
+    campaign_id: int | None = Query(None),
+):
+    """List captured email leads for remarketing."""
+    from app.models.visitor import EmailLead
+
+    since = datetime.utcnow() - timedelta(days=days)
+    subq = select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)
+    if campaign_id:
+        subq = subq.where(Doorway.campaign_id == campaign_id)
+    subq = subq.scalar_subquery()
+    r = await db.execute(
+        select(EmailLead)
+        .where(EmailLead.doorway_id.in_(subq), EmailLead.created_at >= since)
+        .order_by(EmailLead.created_at.desc())
+        .limit(2000)
+    )
+    leads = r.scalars().all()
+    total_r = await db.execute(
+        select(func.count(EmailLead.id)).where(
+            EmailLead.doorway_id.in_(subq), EmailLead.created_at >= since
+        )
+    )
+    total = total_r.scalar() or 0
+    return {
+        "total": total,
+        "leads": [
+            {"id": l.id, "email": l.email, "visitor_id": l.visitor_id, "doorway_id": l.doorway_id, "created_at": l.created_at.isoformat() if l.created_at else None}
+            for l in leads
+        ],
+    }
+
+
+@router.get("/visitors/export")
+async def export_visitors(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=1, le=365),
+    campaign_id: int | None = Query(None),
+    format: str = Query("csv", description="csv or hashed_csv for hashed visitor_id"),
+):
+    """Export visitor_ids for retargeting (Facebook Custom Audiences, Google Customer Match)."""
+    from app.models.visitor import VisitorEvent
+    from fastapi.responses import StreamingResponse
+    import csv
+    import hashlib
+    import io
+
+    since = datetime.utcnow() - timedelta(days=days)
+    subq = select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)
+    if campaign_id:
+        subq = subq.where(Doorway.campaign_id == campaign_id)
+    subq = subq.scalar_subquery()
+    r = await db.execute(
+        select(VisitorEvent.visitor_id)
+        .where(VisitorEvent.doorway_id.in_(subq), VisitorEvent.created_at >= since)
+        .distinct()
+    )
+    visitor_ids = [row[0] for row in r.all() if row[0]]
+
+    def gen():
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["visitor_id"] if format != "hashed_csv" else ["hashed_id"])
+        for vid in visitor_ids:
+            if format == "hashed_csv":
+                h = hashlib.sha256(vid.encode()).hexdigest()
+                w.writerow([h])
+            else:
+                w.writerow([vid])
+            yield buf.getvalue()
+            buf.truncate(0)
+            buf.seek(0)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=visitors_export.csv"},
+    )
+
+
+@router.get("/visitors")
+async def get_visitors(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=1, le=365),
+    campaign_id: int | None = Query(None),
+):
+    """List captured visitors (for remarketing base). Requires visitor_capture_enabled."""
+    from app.models.visitor import VisitorEvent
+    from sqlalchemy import distinct
+
+    since = datetime.utcnow() - timedelta(days=days)
+    subq = select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)
+    if campaign_id:
+        subq = subq.where(Doorway.campaign_id == campaign_id)
+    subq = subq.scalar_subquery()
+    q = (
+        select(
+            VisitorEvent.visitor_id,
+            func.count(VisitorEvent.id).label("events"),
+            func.max(VisitorEvent.created_at).label("last_seen"),
+        )
+        .where(
+            VisitorEvent.doorway_id.in_(subq),
+            VisitorEvent.created_at >= since,
+        )
+        .group_by(VisitorEvent.visitor_id)
+        .order_by(func.max(VisitorEvent.created_at).desc())
+        .limit(500)
+    )
+    r = await db.execute(q)
+    rows = r.all()
+    total = await db.execute(
+        select(func.count(distinct(VisitorEvent.visitor_id))).where(
+            VisitorEvent.doorway_id.in_(subq),
+            VisitorEvent.created_at >= since,
+        )
+    )
+    total_count = total.scalar() or 0
+    return {
+        "total": total_count,
+        "visitors": [
+            {"visitor_id": row.visitor_id, "events": row.events, "last_seen": row.last_seen.isoformat() if row.last_seen else None}
+            for row in rows
+        ],
+    }
+
+
 @router.get("/cwv")
 async def get_core_web_vitals(
     current_user: CurrentUser,
@@ -236,10 +642,124 @@ async def get_analytics_summary(
     row = r.first()
     r2 = await db.execute(select(func.count(Doorway.id)).join(Campaign).where(Campaign.user_id == current_user.id))
     count = r2.scalar() or 0
+    imp = int(row.impressions) if row else 0
+    clk = int(row.clicks) if row else 0
+    conv = int(row.conversions) if row else 0
+    rev = float(row.revenue) if row and row.revenue is not None else 0
+    ctr = (clk / imp * 100) if imp else 0
+    cr = (conv / clk * 100) if clk else 0
     return AnalyticsSummary(
-        total_impressions=int(row.impressions) if row else 0,
-        total_clicks=int(row.clicks) if row else 0,
-        total_conversions=int(row.conversions) if row else 0,
-        total_revenue=float(row.revenue) if row else 0,
+        total_impressions=imp,
+        total_clicks=clk,
+        total_conversions=conv,
+        total_revenue=rev,
         doorway_count=count,
+        ctr_percent=round(ctr, 2),
+        cr_percent=round(cr, 2),
     )
+
+
+@router.get("/daily", response_model=AnalyticsDailyResponse)
+async def get_analytics_daily(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=1, le=365),
+):
+    """Time series of impressions, clicks, conversions, revenue by day (for charts)."""
+    since = datetime.utcnow() - timedelta(days=days)
+    subq = select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)
+    day_col = func.date_trunc("day", DoorwayMetrics.date)
+    q = (
+        select(
+            day_col.label("day"),
+            func.coalesce(func.sum(DoorwayMetrics.impressions), 0).label("impressions"),
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clicks"),
+            func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conversions"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("revenue"),
+        )
+        .select_from(DoorwayMetrics)
+        .where(DoorwayMetrics.doorway_id.in_(subq), DoorwayMetrics.date >= since)
+        .group_by(day_col)
+        .order_by(day_col)
+    )
+    r = await db.execute(q)
+    rows = r.all()
+    series = []
+    for row in rows:
+        day_val = row.day
+        if hasattr(day_val, "strftime"):
+            date_str = day_val.strftime("%Y-%m-%d")
+        else:
+            date_str = str(day_val)[:10]
+        imp = int(row.impressions or 0)
+        clk = int(row.clicks or 0)
+        conv = int(row.conversions or 0)
+        rev = float(row.revenue or 0)
+        ctr = (clk / imp * 100) if imp else 0
+        cr = (conv / clk * 100) if clk else 0
+        series.append(
+            DailyMetricsPoint(
+                date=date_str,
+                impressions=imp,
+                clicks=clk,
+                conversions=conv,
+                revenue=rev,
+                ctr_percent=round(ctr, 2),
+                cr_percent=round(cr, 2),
+            )
+        )
+    return AnalyticsDailyResponse(series=series)
+
+
+@router.get("/campaigns", response_model=AnalyticsCampaignsResponse)
+async def get_analytics_campaigns(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=1, le=365),
+):
+    """Per-campaign performance: impressions, clicks, CR, revenue, ROI."""
+    since = datetime.utcnow() - timedelta(days=days)
+    q = (
+        select(
+            Campaign.id.label("campaign_id"),
+            Campaign.name.label("name"),
+            func.coalesce(func.sum(DoorwayMetrics.impressions), 0).label("impressions"),
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clicks"),
+            func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conversions"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("revenue"),
+            func.count(func.distinct(DoorwayMetrics.doorway_id)).label("doorway_count"),
+        )
+        .select_from(DoorwayMetrics)
+        .join(Doorway, Doorway.id == DoorwayMetrics.doorway_id)
+        .join(Campaign, Campaign.id == Doorway.campaign_id)
+        .where(Campaign.user_id == current_user.id, DoorwayMetrics.date >= since)
+        .group_by(Campaign.id, Campaign.name)
+        .order_by(func.coalesce(func.sum(DoorwayMetrics.revenue), 0).desc())
+    )
+    r = await db.execute(q)
+    rows = r.all()
+    campaigns = []
+    for row in rows:
+        imp = int(row.impressions or 0)
+        clk = int(row.clicks or 0)
+        conv = int(row.conversions or 0)
+        rev = float(row.revenue or 0)
+        dw_count = int(row.doorway_count or 0)
+        ctr = (clk / imp * 100) if imp else 0
+        cr = (conv / clk * 100) if clk else 0
+        roi = (rev / clk) if clk else 0
+        campaigns.append(
+            CampaignPerformance(
+                campaign_id=row.campaign_id,
+                name=row.name or f"Campaign #{row.campaign_id}",
+                impressions=imp,
+                clicks=clk,
+                conversions=conv,
+                revenue=rev,
+                ctr_percent=round(ctr, 2),
+                cr_percent=round(cr, 2),
+                roi_per_click=round(roi, 4),
+                doorway_count=dw_count,
+            )
+        )
+    return AnalyticsCampaignsResponse(campaigns=campaigns)
