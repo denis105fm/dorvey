@@ -69,9 +69,9 @@ def health_check():
 
 
 def _instruction_path() -> Path:
-    """Path to docs/ИНСТРУКЦИЯ.md (project root = parent of backend)."""
-    backend_dir = Path(__file__).resolve().parent.parent
-    return backend_dir.parent / "docs" / "ИНСТРУКЦИЯ.md"
+    """Path to instruction.md inside app package (always deployed with backend)."""
+    app_dir = Path(__file__).resolve().parent
+    return app_dir / "static" / "instruction.md"
 
 
 @app.get("/api/docs/instruction", response_class=PlainTextResponse)
@@ -79,7 +79,7 @@ def get_instruction():
     """Return instruction markdown for in-app help."""
     path = _instruction_path()
     if not path.exists():
-        return PlainTextResponse(content="# Инструкция\n\nФайл инструкции не найден (docs/ИНСТРУКЦИЯ.md).", status_code=404)
+        return PlainTextResponse(content="# Инструкция\n\nФайл инструкции не найден.", status_code=404)
     return PlainTextResponse(content=path.read_text(encoding="utf-8"))
 
 
