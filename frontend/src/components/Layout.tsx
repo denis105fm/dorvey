@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, FolderOpen, FileText, Server, Globe, LogOut, LayoutTemplate, Search, BarChart2, Settings, DollarSign, Users, Link2, Moon, Sun, Bell, TrendingUp } from "lucide-react";
+import { LayoutDashboard, FolderOpen, FileText, Server, Globe, LogOut, LayoutTemplate, Search, BarChart2, Settings, DollarSign, Users, Link2, Moon, Sun, Bell, TrendingUp, BookOpen } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useWhitelabel } from "../hooks/useWhitelabel";
 import { useThemeStore } from "../stores/themeStore";
@@ -42,6 +42,7 @@ const navGroups = [
   {
     title: "Система",
     items: [
+      { to: "/instruction", icon: BookOpen, label: "Инструкция" },
       { to: "/settings", icon: Settings, label: "Настройки" },
       { to: "/users", icon: Users, label: "Пользователи" },
     ],

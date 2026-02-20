@@ -16,6 +16,7 @@ const LABELS: Record<string, string> = {
   seo: "SEO",
   settings: "Настройки",
   users: "Пользователи",
+  instruction: "Инструкция",
 };
 
 export default function Breadcrumbs() {
