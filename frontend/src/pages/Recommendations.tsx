@@ -58,7 +58,8 @@ export default function Recommendations() {
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Страна</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Офферов</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Наши клики</th>
-                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Новости (внеш.)</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Новости</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Источники</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Сезонность</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Приоритет</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Рекомендуем</th>
@@ -73,6 +74,16 @@ export default function Recommendations() {
                     <td className="px-4 py-3 text-slate-300">{r.offer_count}</td>
                     <td className="px-4 py-3 text-slate-300">{r.our_clicks}</td>
                     <td className="px-4 py-3 text-slate-400">{r.external_news_count > 0 ? r.external_news_count : "—"}</td>
+                    <td className="px-4 py-3">
+                      {(r.sources_used?.length ?? 0) > 0 ? (
+                        <span className="text-xs text-slate-400" title={r.sources_used?.join(", ")}>
+                          {r.sources_used?.slice(0, 3).join(", ")}
+                          {(r.sources_used?.length ?? 0) > 3 ? "…" : ""}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {r.external_seasonality ? (
                         <span className="text-emerald-400 text-sm">Да</span>
@@ -98,7 +109,7 @@ export default function Recommendations() {
 
       {list.length > 0 && (
         <p className="text-slate-500 text-xs mt-4">
-          Включите «Внешние данные» и укажите NewsAPI в Настройках — тогда появятся новости и сезонность по странам.
+          Включите «Внешние данные» в Настройках и укажите хотя бы один источник (NewsAPI, GNews, Mediastack, Guardian). REST Countries подключается автоматически.
         </p>
       )}
     </div>

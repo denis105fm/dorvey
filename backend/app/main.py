@@ -6,8 +6,8 @@ Backend FastAPI Application
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func
 
@@ -81,6 +81,26 @@ def get_instruction():
     if not path.exists():
         return PlainTextResponse(content="# Инструкция\n\nФайл инструкции не найден.", status_code=404)
     return PlainTextResponse(content=path.read_text(encoding="utf-8"))
+
+
+def _images_dir() -> Path:
+    """Path to instruction images (SVG placeholders)."""
+    return Path(__file__).resolve().parent / "static" / "images"
+
+
+@app.get("/api/docs/images/{filename}")
+def get_instruction_image(filename: str):
+    """Serve instruction images (placeholders or user screenshots). Safe: only .png, .jpg, .svg."""
+    if not filename or ".." in filename or "/" in filename:
+        raise HTTPException(404, "Not found")
+    ext = filename.lower().split(".")[-1] if "." in filename else ""
+    if ext not in ("png", "jpg", "jpeg", "svg"):
+        raise HTTPException(404, "Not found")
+    path = _images_dir() / filename
+    if not path.exists():
+        raise HTTPException(404, "Not found")
+    media = "image/svg+xml" if ext == "svg" else f"image/{ext}" if ext != "jpg" else "image/jpeg"
+    return FileResponse(path, media_type=media)
 
 
 # API Routes

@@ -31,16 +31,20 @@ async def deploy_doorway(
     db: AsyncSession = Depends(get_db),
 ):
     r = await db.execute(
-        select(Doorway)
-        .join(Campaign)
+        select(Doorway, Campaign)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
         .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
     )
-    dw = r.scalar_one_or_none()
-    if not dw:
+    row = r.first()
+    if not row:
         raise HTTPException(status_code=404, detail="Doorway not found")
-    html = await prepare_doorway_html(db, doorway_id)
+    dw, camp = row
+    html = await prepare_doorway_html(db, doorway_id, for_bot=False)
     if not html:
         raise HTTPException(status_code=500, detail="Could not prepare HTML")
+    camp_cloaking = (camp.affiliate_rules or {}).get("cloaking") or {}
+    dw_cloaking = (dw.cloaking_rules or {}).get("cloaking") or {}
+    cloaking_enabled = (isinstance(camp_cloaking, dict) and camp_cloaking.get("enabled")) or (isinstance(dw_cloaking, dict) and dw_cloaking.get("enabled")) or bool((dw.cloaking_rules or {}).get("cloaking_enabled"))
     r2 = await db.execute(
         select(Domain, Server)
         .join(Server, Domain.server_id == Server.id)
@@ -68,6 +72,19 @@ async def deploy_doorway(
             html_content=html,
             base_path=srv.path,
         )
+        if ok and cloaking_enabled:
+            html_seo = await prepare_doorway_html(db, doorway_id, for_bot=True)
+            if html_seo:
+                ok2, msg2 = deploy_doorway_sync(
+                    server=srv,
+                    domain=dom.domain,
+                    path=dw.path or "/",
+                    html_content=html_seo,
+                    base_path=srv.path,
+                    remote_suffix=".seo",
+                )
+                if ok2:
+                    msg += "; cloaking SEO version deployed (index.seo.html)"
     if not ok:
         raise HTTPException(status_code=500, detail=f"Deploy failed: {msg}")
     # Deploy service worker for push (when visitor capture may be used)

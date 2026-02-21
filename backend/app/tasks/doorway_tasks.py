@@ -57,20 +57,28 @@ def deploy_doorway_async(doorway_id: int):
         engine = create_async_engine(settings.DATABASE_URL)
         async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with async_session() as db:
-            html = await prepare_doorway_html(db, doorway_id)
+            html = await prepare_doorway_html(db, doorway_id, for_bot=False)
             if not html:
                 return {"status": "error", "message": "Could not prepare HTML"}
             r = await db.execute(
-                select(Doorway, Domain, Server)
+                select(Doorway, Domain, Server, Campaign)
                 .join(Domain, Doorway.domain_id == Domain.id)
                 .join(Server, Domain.server_id == Server.id)
+                .join(Campaign, Doorway.campaign_id == Campaign.id)
                 .where(Doorway.id == doorway_id)
             )
             row = r.first()
             if not row:
                 return {"status": "error", "message": "Not found"}
-            dw, dom, srv = row
+            dw, dom, srv, camp = row
             ok, msg = deploy_doorway_sync(srv, dom.domain, dw.path or "/", html, srv.path)
+            camp_cloaking = (camp.affiliate_rules or {}).get("cloaking") or {}
+            dw_cloaking = (dw.cloaking_rules or {}).get("cloaking") or {}
+            cloaking_enabled = (isinstance(camp_cloaking, dict) and camp_cloaking.get("enabled")) or (isinstance(dw_cloaking, dict) and dw_cloaking.get("enabled")) or bool((dw.cloaking_rules or {}).get("cloaking_enabled"))
+            if ok and cloaking_enabled:
+                html_seo = await prepare_doorway_html(db, doorway_id, for_bot=True)
+                if html_seo:
+                    ok2, _ = deploy_doorway_sync(srv, dom.domain, dw.path or "/", html_seo, srv.path, remote_suffix=".seo")
             if not ok:
                 return {"status": "error", "message": msg}
             if getattr(srv, "auth_type", None) != "ftp":
@@ -135,28 +143,34 @@ def deploy_batch_with_stagger(
         async with async_session() as db:
             for i, dw_id in enumerate(doorway_ids):
                 sleep_for_stagger(i, total, cfg)
-                html = await prepare_doorway_html(db, dw_id)
+                html = await prepare_doorway_html(db, dw_id, for_bot=False)
                 if not html:
                     results.append({"doorway_id": dw_id, "ok": False, "msg": "Could not prepare HTML"})
                     continue
                 r = await db.execute(
-                    select(Doorway, Domain, Server)
+                    select(Doorway, Domain, Server, Campaign)
                     .join(Domain, Doorway.domain_id == Domain.id)
                     .join(Server, Domain.server_id == Server.id)
+                    .join(Campaign, Doorway.campaign_id == Campaign.id)
                     .where(Doorway.id == dw_id)
                 )
                 row = r.first()
                 if not row:
                     results.append({"doorway_id": dw_id, "ok": False, "msg": "Not found"})
                     continue
-                dw, dom, srv = row
+                dw, dom, srv, camp = row
                 ok, msg = deploy_doorway_sync(srv, dom.domain, dw.path or "/", html, srv.path)
                 if not ok:
                     results.append({"doorway_id": dw_id, "ok": False, "msg": msg})
                     continue
+                camp_cloaking = (camp.affiliate_rules or {}).get("cloaking") or {}
+                dw_cloaking = (dw.cloaking_rules or {}).get("cloaking") or {}
+                cloaking_enabled = (isinstance(camp_cloaking, dict) and camp_cloaking.get("enabled")) or (isinstance(dw_cloaking, dict) and dw_cloaking.get("enabled")) or bool((dw.cloaking_rules or {}).get("cloaking_enabled"))
+                if ok and cloaking_enabled:
+                    html_seo = await prepare_doorway_html(db, dw_id, for_bot=True)
+                    if html_seo:
+                        deploy_doorway_sync(srv, dom.domain, dw.path or "/", html_seo, srv.path, remote_suffix=".seo")
                 if getattr(srv, "auth_type", None) != "ftp":
-                    camp_r = await db.execute(select(Campaign).where(Campaign.id == dw.campaign_id))
-                    camp = camp_r.scalar_one_or_none()
                     if camp:
                         set_r = await db.execute(
                             select(Setting).where(

@@ -1,11 +1,15 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import api from "../api/client";
 
 export default function Keywords() {
   const qc = useQueryClient();
   const [campaignId, setCampaignId] = useState(1);
   const [volume, setVolume] = useState(0);
+  const [suggestSeed, setSuggestSeed] = useState("");
+  const [suggestCountry, setSuggestCountry] = useState("RU");
+  const [selectedSuggest, setSelectedSuggest] = useState<{ keyword: string; volume: number; cpc: number }[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: keywords, isLoading } = useQuery({
@@ -17,6 +21,34 @@ export default function Keywords() {
   const { data: campaigns } = useQuery({
     queryKey: ["campaigns"],
     queryFn: () => api.get("/campaigns/").then((r) => r.data),
+  });
+
+  const { data: offerGeos } = useQuery({
+    queryKey: ["keywords", "offer-geos", campaignId],
+    queryFn: () => api.get("/keywords/suggest-by-offers-geo", { params: { campaign_id: campaignId } }).then((r) => r.data),
+    enabled: !!campaignId,
+  });
+
+  const suggestMut = useMutation({
+    mutationFn: (d: { campaign_id: number; seed: string; country: string; limit: number }) =>
+      api.post("/keywords/suggest-from-external", d).then((r) => r.data),
+    onSuccess: () => { setSelectedSuggest([]); },
+  });
+
+  const suggestByOffersMut = useMutation({
+    mutationFn: (d: { campaign_id: number; seed: string; limit: number }) =>
+      api.post("/keywords/suggest-by-offers-geo-batch", { ...d, country: "RU" }).then((r) => r.data),
+    onSuccess: () => { setSelectedSuggest([]); },
+  });
+
+  const importSuggestMut = useMutation({
+    mutationFn: (d: { campaign_id: number; items: { keyword: string; volume: number; cpc: number }[]; region?: string }) =>
+      api.post("/keywords/bulk-import-from-suggest", d).then((r) => r.data),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["keywords", campaignId] });
+      setSelectedSuggest([]);
+      toast.success(`Импортировано ${v.items.length} ключей`);
+    },
   });
 
   const bulkMut = useMutation({
@@ -62,6 +94,88 @@ export default function Keywords() {
           <button onClick={() => fileRef.current?.click()} disabled={bulkMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm">Импорт CSV</button>
         </div>
       </div>
+
+      <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-800/50">
+        <h2 className="text-lg font-medium text-white mb-3">Подтянуть из внешних источников (DataForSeo)</h2>
+        <p className="text-slate-400 text-sm mb-3">Ключи с объёмом по гео. Настройте DataForSeo в Настройках → Интеграции.</p>
+        <div className="flex flex-wrap items-end gap-3 mb-3">
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">Стартовый запрос (seed)</label>
+            <input
+              value={suggestSeed}
+              onChange={(e) => setSuggestSeed(e.target.value)}
+              placeholder="кредит наличными"
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white w-56"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1">Страна (geo)</label>
+            <select
+              value={suggestCountry}
+              onChange={(e) => setSuggestCountry(e.target.value)}
+              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
+            >
+              {offerGeos?.geos?.length ? offerGeos.geos.map((g: string) => <option key={g} value={g}>{g} (офферы)</option>) : null}
+              <option value="RU">RU</option>
+              <option value="US">US</option>
+              <option value="KZ">KZ</option>
+              <option value="BY">BY</option>
+              <option value="UA">UA</option>
+              <option value="DE">DE</option>
+            </select>
+          </div>
+          <button
+            onClick={() => suggestMut.mutate({ campaign_id: campaignId, seed: suggestSeed, country: suggestCountry, limit: 50 })}
+            disabled={!suggestSeed.trim() || suggestMut.isPending}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white rounded-lg text-sm"
+          >
+            {suggestMut.isPending ? "Загрузка…" : "Подтянуть"}
+          </button>
+          <button
+            onClick={() => suggestByOffersMut.mutate({ campaign_id: campaignId, seed: suggestSeed, limit: 80 })}
+            disabled={!suggestSeed.trim() || suggestByOffersMut.isPending || !offerGeos?.geos?.length}
+            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded-lg text-sm"
+            title="Подтянуть по гео офферов кампании"
+          >
+            {suggestByOffersMut.isPending ? "Загрузка…" : "По гео офферов"}
+          </button>
+        </div>
+        {(suggestMut.data?.keywords?.length || suggestByOffersMut.data?.keywords?.length) ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 text-sm">Выберите ключи для импорта (сортировка по объёму):</span>
+              <button
+                onClick={() => importSuggestMut.mutate({ campaign_id: campaignId, items: selectedSuggest, region: (suggestByOffersMut.data ? undefined : suggestCountry) })}
+                disabled={selectedSuggest.length === 0 || importSuggestMut.isPending}
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-sm"
+              >
+                Импортировать выбранные ({selectedSuggest.length})
+              </button>
+            </div>
+            <div className="max-h-48 overflow-y-auto border border-slate-600 rounded-lg p-2 space-y-1">
+              {(suggestMut.data || suggestByOffersMut.data)?.keywords?.slice(0, 80).map((kw: { keyword: string; volume: number; cpc: number }, i: number) => (
+                <label key={i} className="flex items-center gap-3 cursor-pointer hover:bg-slate-700/50 rounded px-2 py-1">
+                  <input
+                    type="checkbox"
+                    checked={selectedSuggest.some((s) => s.keyword === kw.keyword)}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedSuggest((prev) => [...prev, kw]);
+                      else setSelectedSuggest((prev) => prev.filter((s) => s.keyword !== kw.keyword));
+                    }}
+                    className="rounded border-slate-600 text-violet-600"
+                  />
+                  <span className="text-white flex-1">{kw.keyword}</span>
+                  <span className="text-slate-400 text-sm">{kw.volume} запросов/мес</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : (suggestMut.isError || suggestByOffersMut.isError) ? (
+          <p className="text-amber-400 text-sm">
+            {((suggestMut.error || suggestByOffersMut.error) as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка. Укажите DataForSeo в Настройках → Интеграции."}
+          </p>
+        ) : null}
+      </div>
       {isLoading ? (
         <p className="text-slate-400">Загрузка...</p>
       ) : (
@@ -74,15 +188,17 @@ export default function Keywords() {
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Ключевое слово</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Кластер</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Объём</th>
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium">Гео</th>
                 </tr>
               </thead>
               <tbody>
-                {keywords.map((k: { id: number; keyword: string; cluster_id: number | null; volume: number }) => (
+                {keywords.map((k: { id: number; keyword: string; cluster_id: number | null; volume: number; region?: string }) => (
                   <tr key={k.id} className="border-b border-slate-700/50">
                     <td className="px-4 py-3 text-white">{k.id}</td>
                     <td className="px-4 py-3 text-white">{k.keyword}</td>
                     <td className="px-4 py-3 text-slate-400">{k.cluster_id ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-400">{k.volume}</td>
+                    <td className="px-4 py-3 text-slate-400">{k.region ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>

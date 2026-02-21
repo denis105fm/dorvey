@@ -60,6 +60,11 @@ export default function Doorways() {
     queryKey: ["domains"],
     queryFn: () => api.get("/domains/").then((r) => r.data),
   });
+  const { data: campaignKeywords } = useQuery({
+    queryKey: ["keywords", gen.campaign_id],
+    queryFn: () => api.get("/keywords/", { params: { campaign_id: gen.campaign_id } }).then((r) => r.data),
+    enabled: !!gen.campaign_id && wizardStep === 1,
+  });
   const { data: doorwaysMetrics } = useQuery({
     queryKey: ["analytics-doorways-metrics", 30],
     queryFn: () => api.get("/analytics/doorways-metrics", { params: { days: 30 } }).then((r) => r.data),
@@ -283,7 +288,19 @@ export default function Doorways() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Ключевое слово</label>
-                  <Input value={gen.keyword} onChange={(e) => setGen((g) => ({ ...g, keyword: e.target.value }))} placeholder="кредит наличными" />
+                  <div className="flex gap-2">
+                    <Input value={gen.keyword} onChange={(e) => setGen((g) => ({ ...g, keyword: e.target.value }))} placeholder="кредит наличными" className="flex-1" />
+                    <Select
+                      value=""
+                      onChange={(e) => { const v = e.target.value; if (v) setGen((g) => ({ ...g, keyword: v })); }}
+                      className="w-48"
+                    >
+                      <option value="">Из кампании…</option>
+                      {(campaignKeywords as { keyword: string; volume: number }[] | undefined)?.slice(0, 30).map((k) => (
+                        <option key={k.keyword} value={k.keyword}>{k.keyword} ({k.volume})</option>
+                      ))}
+                    </Select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Путь</label>
@@ -291,7 +308,20 @@ export default function Doorways() {
                 </div>
               </div>
               <div className="p-4 bg-slate-900/50 rounded-lg">
-                <label className="block text-slate-400 text-sm mb-2">Пакетная генерация (по 1 ключу на строку)</label>
+                <label className="block text-slate-400 text-sm mb-2">Пакетная генерация (по 1 ключу на строку, сортировка по объёму)</label>
+                <div className="flex gap-2 mb-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      const kws = (campaignKeywords as { keyword: string; volume: number }[] | undefined) ?? [];
+                      setBatchKeywords(kws.map((k) => k.keyword).join("\n"));
+                    }}
+                    disabled={!campaignKeywords?.length}
+                  >
+                    Загрузить из кампании ({campaignKeywords?.length ?? 0} ключей)
+                  </Button>
+                </div>
                 <textarea
                   value={batchKeywords}
                   onChange={(e) => setBatchKeywords(e.target.value)}

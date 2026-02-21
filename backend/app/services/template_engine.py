@@ -17,6 +17,8 @@ LAYOUT_CSS_VARIANTS = [
     {"main": "page-body", "cta": "cta", "trust": "trust-elements"},
     {"main": "article-body", "cta": "cta cta-large", "trust": "trust-elements"},
     {"main": "main-content", "cta": "btn-cta cta-large", "trust": "badges"},
+    {"main": "post-content", "cta": "action-btn", "trust": "trust-badges"},
+    {"main": "entry-content", "cta": "link-cta", "trust": "guarantees"},
 ]
 
 DEFAULT_PAGE_TEMPLATE = """<!DOCTYPE html>
@@ -32,11 +34,11 @@ DEFAULT_PAGE_TEMPLATE = """<!DOCTYPE html>
     <style>
         body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; line-height: 1.6; }
         h1 { color: #16a34a; margin-bottom: 1rem; }
-        .cta, .btn-cta { display: inline-block; margin-top: 1rem; padding: 0.75rem 1.5rem; background: #22c55e; color: white; text-decoration: none; border-radius: 0.5rem; }
-        .cta:hover, .btn-cta:hover { background: #16a34a; }
+        .cta, .btn-cta, .action-btn, .link-cta { display: inline-block; margin-top: 1rem; padding: 0.75rem 1.5rem; background: #22c55e; color: white; text-decoration: none; border-radius: 0.5rem; }
+        .cta:hover, .btn-cta:hover, .action-btn:hover, .link-cta:hover { background: #16a34a; }
         .cta-large, .btn-cta.cta-large { padding: 1rem 2rem; font-size: 1.1rem; }
-        .trust-elements, .badges { display: flex; gap: 1rem; margin: 1.5rem 0; flex-wrap: wrap; }
-        .trust-elements span, .badges span { font-size: 0.85rem; color: #16a34a; }
+        .trust-elements, .badges, .trust-badges, .guarantees { display: flex; gap: 1rem; margin: 1.5rem 0; flex-wrap: wrap; }
+        .trust-elements span, .badges span, .trust-badges span, .guarantees span { font-size: 0.85rem; color: #16a34a; }
         .comparison-table { margin: 1.5rem 0; overflow-x: auto; }
         .comparison-table table { width: 100%; border-collapse: collapse; }
         .comparison-table th, .comparison-table td { border: 1px solid #e5e7eb; padding: 0.5rem 0.75rem; text-align: left; }
@@ -371,9 +373,9 @@ var esc2=false;window.addEventListener('scroll',function(){{if(esc2)return;var h
     dw_id_visitor = doorway_id if doorway_id is not None else _dw_id
     if visitor_capture and analytics_base and dw_id_visitor is not None:
         base_esc = analytics_base.replace("\\", "\\\\").replace("'", "\\'")
-        visitor_script = f"""<script>(function(){{var vid=localStorage.getItem('dv_vid');if(!vid){{vid='v_'+Math.random().toString(36).slice(2)+Date.now();localStorage.setItem('dv_vid',vid)}}var dw='{dw_id_visitor}';var base='{base_esc}';var i=new Image();i.src=base+'/api/analytics/visit?dw='+dw+'&vid='+encodeURIComponent(vid);function addVidToLinks(){{var links=document.querySelectorAll('a.cta,a.btn-cta,a.exit-cta,.cta-footer-btn');links.forEach(function(a){{if(a.href.indexOf('analytics/click')>=0){{try{{var u=new URL(a.href);if(!u.searchParams.get('vid'))u.searchParams.set('vid',vid);a.href=u.toString()}}catch(e){{}}}}}})}}addVidToLinks();document.addEventListener('DOMContentLoaded',addVidToLinks);setTimeout(addVidToLinks,500)}})();</script>"""
+        visitor_script = f"""<script>(function(){{var vid=localStorage.getItem('dv_vid');if(!vid){{vid='v_'+Math.random().toString(36).slice(2)+Date.now();localStorage.setItem('dv_vid',vid)}}var dw='{dw_id_visitor}';var base='{base_esc}';var i=new Image();i.src=base+'/api/analytics/visit?dw='+dw+'&vid='+encodeURIComponent(vid);function addVidToLinks(){{var links=document.querySelectorAll('a.cta,a.btn-cta,a.action-btn,a.link-cta,a.exit-cta,.cta-footer-btn');links.forEach(function(a){{if(a.href.indexOf('analytics/click')>=0){{try{{var u=new URL(a.href);if(!u.searchParams.get('vid'))u.searchParams.set('vid',vid);a.href=u.toString()}}catch(e){{}}}}}})}}addVidToLinks();document.addEventListener('DOMContentLoaded',addVidToLinks);setTimeout(addVidToLinks,500)}})();</script>"""
     # Device + geo detection + GEO/device offer selection
-    device_script = """<script>(function(){var m=/iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)||(window.innerWidth<768);document.body.classList.add(m?'device-mobile':'device-desktop');var d=m?'mobile':'desktop';function pickOffer(geo){var ob=document.body.getAttribute('data-offers');var dw=document.body.getAttribute('data-doorway-id');if(!ob||!dw)return;try{var offers=JSON.parse(ob);var best=null;for(var i=0;i<offers.length;i++){var o=offers[i];if(o.geo&&geo&&o.geo.toUpperCase()!==geo)continue;if(o.device&&o.device.toLowerCase()!==d)continue;best=o.url;break}if(!best&&offers.length)best=offers[0].url;var links=document.querySelectorAll('a.cta,a.btn-cta,a.exit-cta,.cta-footer-btn');if(links.length&&links[0].href.indexOf('analytics/click')>=0){try{var u=new URL(links[0].href);u.searchParams.set('geo',geo||'');u.searchParams.set('device',d);links.forEach(function(a){a.href=u.toString()})}catch(e){}}else if(best){var sep=best.indexOf('?')>=0?'&':'?';var u=best+sep+'sub_id='+dw;links.forEach(function(a){a.href=u})}}catch(e){}}fetch('https://ipapi.co/json/').then(function(r){return r.json();}).then(function(j){if(j&&j.country_code){document.body.classList.add('geo-'+j.country_code.toUpperCase());pickOffer(j.country_code.toUpperCase())}else pickOffer()}).catch(function(){pickOffer()})})();</script>"""
+    device_script = """<script>(function(){var m=/iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)||(window.innerWidth<768);document.body.classList.add(m?'device-mobile':'device-desktop');var d=m?'mobile':'desktop';function pickOffer(geo){var ob=document.body.getAttribute('data-offers');var dw=document.body.getAttribute('data-doorway-id');if(!ob||!dw)return;try{var offers=JSON.parse(ob);var best=null;for(var i=0;i<offers.length;i++){var o=offers[i];if(o.geo&&geo&&o.geo.toUpperCase()!==geo)continue;if(o.device&&o.device.toLowerCase()!==d)continue;best=o.url;break}if(!best&&offers.length)best=offers[0].url;var links=document.querySelectorAll('a.cta,a.btn-cta,a.action-btn,a.link-cta,a.exit-cta,.cta-footer-btn');if(links.length&&links[0].href.indexOf('analytics/click')>=0){try{var u=new URL(links[0].href);u.searchParams.set('geo',geo||'');u.searchParams.set('device',d);links.forEach(function(a){a.href=u.toString()})}catch(e){}}else if(best){var sep=best.indexOf('?')>=0?'&':'?';var u=best+sep+'sub_id='+dw;links.forEach(function(a){a.href=u})}}catch(e){}}fetch('https://ipapi.co/json/').then(function(r){return r.json();}).then(function(j){if(j&&j.country_code){document.body.classList.add('geo-'+j.country_code.toUpperCase());pickOffer(j.country_code.toUpperCase())}else pickOffer()}).catch(function(){pickOffer()})})();</script>"""
     if "</body>" in html:
         to_inject = visitor_script + "\n" + device_script if visitor_script else device_script
         html = html.replace("</body>", f"{to_inject}\n</body>", 1)

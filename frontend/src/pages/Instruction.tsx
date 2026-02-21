@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,6 +25,7 @@ function slugify(text: string): string {
 export default function Instruction() {
   const containerRef = useRef<HTMLDivElement>(null);
   const baseId = useId().replace(/:/g, "-");
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const { data: content, isLoading, error } = useQuery({
     queryKey: ["instruction"],
@@ -100,7 +101,7 @@ export default function Instruction() {
     };
 
   return (
-    <div ref={containerRef} className="max-w-4xl scroll-smooth">
+    <div ref={containerRef} className="max-w-4xl scroll-smooth relative">
       <article className="prose prose-invert prose-slate max-w-none prose-headings:text-white prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-strong:text-white prose-code:bg-slate-700 prose-code:px-1 prose-code:rounded prose-pre:bg-slate-800 prose-pre:border prose-pre:border-slate-600">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
@@ -113,7 +114,13 @@ export default function Instruction() {
               <a href={href} onClick={handleAnchorClick} {...props}>{children}</a>
             ),
             img: ({ src, alt }) => (
-              <img src={src} alt={alt ?? ""} className="rounded-lg border border-slate-600 max-w-full h-auto" loading="lazy" />
+              <button
+                type="button"
+                onClick={() => src && setLightboxSrc(src)}
+                className="block w-full text-left cursor-zoom-in"
+              >
+                <img src={src} alt={alt ?? ""} className="rounded-lg border border-slate-600 max-w-full h-auto hover:border-emerald-500/50 transition-colors" loading="lazy" />
+              </button>
             ),
             pre: ({ node, children, ...props }) => {
               const codeEl = Array.isArray(children) ? children[0] : children;
@@ -135,6 +142,24 @@ export default function Instruction() {
           {content}
         </ReactMarkdown>
       </article>
+
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setLightboxSrc(null)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Escape" && setLightboxSrc(null)}
+          aria-label="Закрыть"
+        >
+          <img
+            src={lightboxSrc}
+            alt=""
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

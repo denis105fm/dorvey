@@ -37,8 +37,13 @@ INTEGRATION_KEYS = [
     "google_ads_id",
     "min_clicks_for_profit",
     "news_api_key",
+    "gnews_api_key",
+    "mediastack_api_key",
+    "guardian_api_key",
     "external_data_enabled",
     "seasonality_data_url",
+    "dataforseo_login",
+    "dataforseo_password",
 ]
 
 BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled", "external_data_enabled"}
@@ -81,8 +86,13 @@ class IntegrationsSettings(BaseModel):
     google_ads_id: Optional[str] = None
     min_clicks_for_profit: Optional[int] = None  # порог кликов для учёта в доле прибыльных (по умолчанию 20)
     news_api_key: Optional[str] = None
+    gnews_api_key: Optional[str] = None
+    mediastack_api_key: Optional[str] = None
+    guardian_api_key: Optional[str] = None
     external_data_enabled: Optional[bool] = False
     seasonality_data_url: Optional[str] = None
+    dataforseo_login: Optional[str] = None
+    dataforseo_password: Optional[str] = None
 
 
 @router.get("/integrations/all")
@@ -152,6 +162,55 @@ async def generate_vapid_keys(
             db.add(Setting(user_id=current_user.id, key=key_name, value=val))
     await db.commit()
     return {"status": "ok", "message": "VAPID ключи сгенерированы и сохранены"}
+
+
+class TestExternalApiRequest(BaseModel):
+    source: str  # newsapi, gnews, mediastack, guardian
+    api_key: str
+    country: str = "us"
+
+
+@router.post("/test-external-api")
+async def test_external_api(
+    data: TestExternalApiRequest,
+    current_user: CurrentUser,
+):
+    """Test external news API key. Returns ok/error and sample headlines count."""
+    src = (data.source or "").lower().strip()
+    key = (data.api_key or "").strip()
+    country = (data.country or "us").lower()[:2]
+    if not key:
+        raise HTTPException(400, "Укажите API ключ")
+    allowed = ("newsapi", "gnews", "mediastack", "guardian")
+    if src not in allowed:
+        raise HTTPException(400, f"Источник должен быть: {', '.join(allowed)}")
+
+    from app.services.external_data_service import (
+        fetch_news_api,
+        fetch_gnews,
+        fetch_mediastack,
+        fetch_guardian,
+    )
+    result: dict = {"ok": False, "source": src, "message": ""}
+    try:
+        if src == "newsapi":
+            p = await fetch_news_api(country, key)
+        elif src == "gnews":
+            p = await fetch_gnews(country, key)
+        elif src == "mediastack":
+            p = await fetch_mediastack(country, key)
+        else:
+            p = await fetch_guardian(key)
+        if p.get("ok"):
+            n = len(p.get("headlines") or [])
+            result["ok"] = True
+            result["message"] = f"OK, получено {n} заголовков"
+            result["count"] = n
+        else:
+            result["message"] = p.get("error") or "Ошибка запроса"
+    except Exception as e:
+        result["message"] = str(e)[:200]
+    return result
 
 
 @router.put("/integrations/all")
