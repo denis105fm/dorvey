@@ -31,12 +31,12 @@ Dorvey — система для создания и деплоя дорвеев
 
 ```mermaid
 flowchart LR
-    subgraph Подготовка
+    subgraph prep["Подготовка"]
         A[Кампания] --> B[Офферы]
         B --> C[Сервер]
         C --> D[Домен]
     end
-    subgraph Контент
+    subgraph content["Контент"]
         E[Ключевое слово] --> F[Генерация дорвея]
         F --> G[Деплой]
     end
@@ -48,7 +48,7 @@ flowchart LR
 
 **Схема потока (визуализация):**
 
-![Общий поток: кампания → дорвеи и офферы → деплой](data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0MjAgNzAiPjxyZWN0IHg9IjUiIHk9IjE1IiB3aWR0aD0iNzUiIGhlaWdodD0iNDAiIGZpbGw9IiMxZTI5M2IiIHN0cm9rZT0iIzEwYjk4MSIgc3Ryb2tlLXdpZHRoPSIyIiByeD0iNCIvPjx0ZXh0IHg9IjQyIiB5PSI0MCIgZmlsbD0iI2UyZThmMCIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+0JrQsNC80L/QsNC90LjRjzwvdGV4dD48cGF0aCBkPSJNODUgMzUgaDI1IiBzdHJva2U9IiM2NDc0OGIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIvPjxyZWN0IHg9IjExNSIgeT0iMTUiIHdpZHRoPSI5MCIgaGVpZ2h0PSI0MCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjMTBiOTgxIiBzdHJva2Utd2lkdGg9IjIiIHJ4PSI0Ii8+PHRleHQgeD0iMTYwIiB5PSI0MCIgZmlsbD0iI2UyZThmMCIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+0JTQvtGA0LLQtdC4PC90ZXh0PjxwYXRoIGQ9Ik0yMTAgMzUgaDI1IiBzdHJva2U9IiM2NDc0OGIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIvPjxyZWN0IHg9IjI0MCIgeT0iMTUiIHdpZHRoPSI5MCIgaGVpZ2h0PSI0MCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjMTBiOTgxIiBzdHJva2Utd2lkdGg9IjIiIHJ4PSI0Ii8+PHRleHQgeD0iMjg1IiB5PSI0MCIgZmlsbD0iI2UyZThmMCIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+0J7RhNGE0LXRgNGLPC90ZXh0PjxwYXRoIGQ9Ik0zMzUgMzUgaDI1IiBzdHJva2U9IiM2NDc0OGIiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIvPjxyZWN0IHg9IjM2NSIgeT0iMTUiIHdpZHRoPSI1MCIgaGVpZ2h0PSI0MCIgZmlsbD0iIzBmNzY2ZSIgc3Ryb2tlPSIjMTRiOGE2IiBzdHJva2Utd2lkdGg9IjIiIHJ4PSI0Ii8+PHRleHQgeD0iMzkwIiB5PSI0MCIgZmlsbD0iI2ZmZiIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+0JTQtdC/0LvQvtC5PC90ZXh0Pjwvc3ZnPg==)
+![Общий поток: кампания → дорвеи и офферы → деплой](/api/docs/images/00-flow.svg)
 
 **Где что находится в меню:**
 
