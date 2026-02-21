@@ -14,5 +14,7 @@ class Keyword(Base):
     keyword = Column(String(500), nullable=False)
     cluster_id = Column(Integer, nullable=True)
     volume = Column(Integer, default=0)
+    region = Column(String(10), nullable=True)
+    source = Column(String(50), nullable=True)
 
     campaign = relationship("Campaign", back_populates="keywords")

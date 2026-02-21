@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import api from "../api/client";
-import { Webhook, Settings as SettingsIcon, Send, Search, Shield, BarChart3, MousePointer, Palette, Bot, CreditCard, Smartphone } from "lucide-react";
+import { Webhook, Settings as SettingsIcon, Send, Search, Shield, BarChart3, MousePointer, Palette, Bot, CreditCard, Smartphone, CheckCircle } from "lucide-react";
 
 type IntegrationsData = {
   openai_api_key?: string | null;
@@ -33,8 +33,13 @@ type IntegrationsData = {
   google_ads_id?: string | null;
   min_clicks_for_profit?: number | null;
   news_api_key?: string | null;
+  gnews_api_key?: string | null;
+  mediastack_api_key?: string | null;
+  guardian_api_key?: string | null;
   external_data_enabled?: boolean | null;
   seasonality_data_url?: string | null;
+  dataforseo_login?: string | null;
+  dataforseo_password?: string | null;
 };
 
 const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
@@ -130,6 +135,13 @@ export default function Settings() {
   const disable2faMut = useMutation({
     mutationFn: (code: string) => api.post("/auth/2fa/disable", { code }).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+  });
+
+  const testExternalMut = useMutation({
+    mutationFn: (d: { source: string; api_key: string; country?: string }) =>
+      api.post("/settings/test-external-api", { ...d, country: d.country || "us" }).then((r) => r.data as { ok: boolean; message: string }),
+    onSuccess: (data) => toast[data.ok ? "success" : "error"](data.message),
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
   });
 
   return (
@@ -309,13 +321,88 @@ export default function Settings() {
           <div className="grid grid-cols-1 gap-3 mb-3">
             <div>
               <label className="block text-slate-400 text-sm mb-1">NewsAPI.org API Key</label>
-              <input
-                value={integrations.news_api_key ?? ""}
-                onChange={(e) => setIntegrations((p) => ({ ...p, news_api_key: e.target.value }))}
-                placeholder="Ключ с newsapi.org (новости по странам)"
-                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  value={integrations.news_api_key ?? ""}
+                  onChange={(e) => setIntegrations((p) => ({ ...p, news_api_key: e.target.value }))}
+                  placeholder="Ключ с newsapi.org (новости по странам)"
+                  className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => testExternalMut.mutate({ source: "newsapi", api_key: integrations.news_api_key ?? "" })}
+                  disabled={!integrations.news_api_key?.trim() || testExternalMut.isPending}
+                  className="px-3 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-1"
+                  title="Проверить подключение"
+                >
+                  <CheckCircle size={16} />
+                  {testExternalMut.isPending ? "…" : "Проверить"}
+                </button>
+              </div>
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">GNews API Key (опц.)</label>
+                <div className="flex gap-2">
+                  <input
+                    value={integrations.gnews_api_key ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, gnews_api_key: e.target.value }))}
+                    placeholder="gnews.io"
+                    className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => testExternalMut.mutate({ source: "gnews", api_key: integrations.gnews_api_key ?? "" })}
+                    disabled={!integrations.gnews_api_key?.trim() || testExternalMut.isPending}
+                    className="px-2 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm"
+                    title="Проверить"
+                  >
+                    <CheckCircle size={16} />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Mediastack API Key (опц.)</label>
+                <div className="flex gap-2">
+                  <input
+                    value={integrations.mediastack_api_key ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, mediastack_api_key: e.target.value }))}
+                    placeholder="mediastack.com"
+                    className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => testExternalMut.mutate({ source: "mediastack", api_key: integrations.mediastack_api_key ?? "" })}
+                    disabled={!integrations.mediastack_api_key?.trim() || testExternalMut.isPending}
+                    className="px-2 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm"
+                    title="Проверить"
+                  >
+                    <CheckCircle size={16} />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Guardian API Key (опц.)</label>
+                <div className="flex gap-2">
+                  <input
+                    value={integrations.guardian_api_key ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, guardian_api_key: e.target.value }))}
+                    placeholder="theguardian.com/open-platform"
+                    className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => testExternalMut.mutate({ source: "guardian", api_key: integrations.guardian_api_key ?? "" })}
+                    disabled={!integrations.guardian_api_key?.trim() || testExternalMut.isPending}
+                    className="px-2 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm"
+                    title="Проверить"
+                  >
+                    <CheckCircle size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p className="text-slate-500 text-xs">Новости: приоритет NewsAPI; при его отсутствии используются GNews, Mediastack, Guardian.</p>
             <div>
               <label className="block text-slate-400 text-sm mb-1">URL данных сезонности (опционально)</label>
               <input
@@ -325,6 +412,28 @@ export default function Settings() {
                 className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">DataForSeo Login</label>
+                <input
+                  value={integrations.dataforseo_login ?? ""}
+                  onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_login: e.target.value }))}
+                  placeholder="Логин с app.dataforseo.com"
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">DataForSeo Password</label>
+                <input
+                  type="password"
+                  value={integrations.dataforseo_password ?? ""}
+                  onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_password: e.target.value }))}
+                  placeholder="Пароль API"
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                />
+              </div>
+            </div>
+            <p className="text-slate-500 text-xs">DataForSeo — подбор ключевых слов по объёму и гео (Ключевые слова → Подтянуть из внешних источников)</p>
           </div>
           <div className="rounded-lg bg-slate-800/80 border border-slate-600 p-3 text-sm space-y-2">
             <p className="text-slate-300 font-medium">Какие ещё источники подключать и как:</p>

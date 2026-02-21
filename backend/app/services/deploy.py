@@ -96,20 +96,23 @@ def deploy_doorway_sync(
     path: str,
     html_content: str,
     base_path: str = "/var/www/html",
+    remote_suffix: str = "",
 ) -> tuple[bool, str]:
     """
     Upload HTML to server. Returns (success, message).
-    Path like / or /page1 - becomes index.html or page1/index.html
+    Path like / or /page1 - becomes index.html or page1/index.html.
+    remote_suffix: e.g. ".seo" -> index.seo.html (for cloaking bot version).
     """
     try:
         client = _get_ssh_client(server)
         sftp = client.open_sftp()
         root = (base_path or server.path or "/var/www/html").rstrip("/")
+        idx = f"index{remote_suffix}.html" if remote_suffix else "index.html"
         if path in ("", "/"):
-            remote = f"{root}/index.html"
+            remote = f"{root}/{idx}"
         else:
             clean = path.strip("/")
-            remote = f"{root}/{clean}/index.html"
+            remote = f"{root}/{clean}/{idx}"
         buf = io.BytesIO(html_content.encode("utf-8"))
         try:
             # Ensure parent dir exists
@@ -205,8 +208,10 @@ def _get_best_offer_url(offers: list, geo: Optional[str] = None, device: Optiona
     return offers[0].get("url") if offers else None
 
 
-async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[str]:
-    """Load doorway and campaign/domain, return full HTML."""
+async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool = False) -> Optional[str]:
+    """Load doorway and campaign/domain, return full HTML.
+    for_bot=True: SEO version for crawlers (no exit-intent, no pop-ups, no tracking scripts).
+    """
     r = await db.execute(
         select(Doorway, Domain, Server)
         .join(Domain, Doorway.domain_id == Domain.id)
@@ -296,6 +301,10 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
         build_webpage_schema,
         build_trust_elements_html,
         build_paa_schema,
+        get_urgency_preset,
+        get_social_proof_preset,
+        get_exit_intent_preset,
+        get_cta_preset,
     )
     from app.services.anti_detection import get_schema_variant, _seed_from_url
 
@@ -339,6 +348,10 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
     if isinstance(cta_by_device, dict):
         cta_desktop = cta_by_device.get("desktop")
         cta_mobile = cta_by_device.get("mobile")
+    if (not cta_desktop and not cta_mobile) and not for_bot:
+        preset = get_cta_preset(camp.language or "ru", seed)
+        cta_desktop = preset.get("desktop") or "Узнать подробнее"
+        cta_mobile = preset.get("mobile") or cta_desktop
 
     urgency_block = None
     u = (dw.cloaking_rules or {}).get("urgency_block") or camp_settings.get("urgency_block")
@@ -346,6 +359,8 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
         urgency_block = str(u["text"])
     elif isinstance(u, str) and u.strip():
         urgency_block = u.strip()
+    if not urgency_block and not for_bot:
+        urgency_block = get_urgency_preset(camp.language or "ru", seed)
 
     exit_intent_title = None
     exit_intent_cta = None
@@ -353,6 +368,10 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
     if isinstance(ei, dict):
         exit_intent_title = ei.get("title") or ei.get("text")
         exit_intent_cta = ei.get("cta_text") or ei.get("cta")
+    if (not exit_intent_title and not exit_intent_cta) and not for_bot and exit_intent:
+        preset = get_exit_intent_preset(camp.language or "ru", seed)
+        exit_intent_title = preset.get("title")
+        exit_intent_cta = preset.get("cta")
 
     data_offers = None
     if len(offers) >= 2 and any(o.get("geo") or o.get("device") for o in offers):
@@ -376,6 +395,17 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
             social_proof_block = "".join(parts_sp)
     elif isinstance(sp, str) and sp.strip():
         social_proof_block = sp.strip()
+    if not social_proof_block and not for_bot:
+        preset = get_social_proof_preset(camp.language or "ru", seed)
+        parts_sp = []
+        if preset.get("stats"):
+            parts_sp.append(f'<div class="social-proof-stats">{preset["stats"]}</div>')
+        for r in preset.get("reviews") or []:
+            t = r if isinstance(r, str) else r.get("text", "")
+            if t:
+                parts_sp.append(f'<div class="social-proof-review">"{t}"</div>')
+        if parts_sp:
+            social_proof_block = "".join(parts_sp)
 
     comparison_table = None
     offers_for_table = [o for o in offers if o.get("name") or o.get("rate") or o.get("amount") or o.get("term")]
@@ -394,6 +424,12 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
             "<tbody>" + "".join(rows) + "</tbody></table>"
         )
 
+    if for_bot:
+        hotjar_id = clarity_id = fb_pixel = ga_id = None
+        exit_intent = False
+        visitor_capture = False
+        data_offers = None
+
     return render_doorway_page(
         title=title,
         meta_description=desc,
@@ -401,10 +437,10 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
         language=camp.language,
         affiliate_url=cta_href,
         canonical_url=canonical,
-        hotjar_site_id=hotjar_id,
-        clarity_project_id=clarity_id,
+        hotjar_site_id=None if for_bot else hotjar_id,
+        clarity_project_id=None if for_bot else clarity_id,
         article_schema=article_schema,
-        exit_intent_enabled=exit_intent,
+        exit_intent_enabled=False if for_bot else exit_intent,
         trust_elements=trust_html,
         faq_schema=faq_schema or None,
         structural_seed=(domain, path, dw.id),
@@ -415,14 +451,14 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int) -> Optional[st
         social_proof_block=social_proof_block,
         exit_intent_title=exit_intent_title,
         exit_intent_cta=exit_intent_cta,
-        data_offers=data_offers,
+        data_offers=None if for_bot else data_offers,
         doorway_id=dw.id,
         faq_block=faq_block,
-        visitor_capture=visitor_capture and bool(click_base),
+        visitor_capture=False if for_bot else (visitor_capture and bool(click_base)),
         analytics_base=click_base or "",
-        push_subscribe_enabled=visitor_capture and bool(click_base) and bool(vapid_public),
+        push_subscribe_enabled=False if for_bot else (visitor_capture and bool(click_base) and bool(vapid_public)),
         vapid_public_key=vapid_public or "",
-        email_capture_enabled=email_capture and bool(click_base),
-        facebook_pixel_id=fb_pixel or None,
-        google_ads_id=ga_id or None,
+        email_capture_enabled=False if for_bot else (email_capture and bool(click_base)),
+        facebook_pixel_id=None if for_bot else fb_pixel,
+        google_ads_id=None if for_bot else ga_id,
     )

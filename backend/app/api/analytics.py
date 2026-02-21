@@ -920,8 +920,9 @@ async def get_analytics_doorways_metrics(
         )
 
     external_by_country = None
-    enabled, news_key, season_url = await _load_external_settings(db, current_user.id)
-    if enabled and (news_key or season_url):
+    enabled, news_key, gnews_key, mstack_key, guard_key, season_url = await _load_external_settings(db, current_user.id)
+    any_news = news_key or gnews_key or mstack_key or guard_key
+    if enabled and (any_news or season_url):
         geo_r = await db.execute(
             select(Offer.geo).join(Campaign).where(Campaign.user_id == current_user.id, Offer.geo.isnot(None), Offer.geo != "")
         )
@@ -930,22 +931,34 @@ async def get_analytics_doorways_metrics(
             from app.services.external_data_service import get_external_signals as fetch_signals
             external_by_country = {}
             for g in geos:
-                external_by_country[g] = await fetch_signals(country_code=g, days=days, news_api_key=news_key, seasonality_data_url=season_url)
+                external_by_country[g] = await fetch_signals(
+                    country_code=g, days=days,
+                    news_api_key=news_key, gnews_api_key=gnews_key,
+                    mediastack_api_key=mstack_key, guardian_api_key=guard_key,
+                    seasonality_data_url=season_url,
+                )
     return AnalyticsDoorwaysMetricsResponse(doorways=result, min_clicks_used=min_clicks, external_signals_by_country=external_by_country)
 
 
-async def _load_external_settings(db: AsyncSession, user_id: int) -> tuple[bool, str | None, str | None]:
+async def _load_external_settings(db: AsyncSession, user_id: int):
+    """Returns (enabled, news_key, gnews_key, mediastack_key, guardian_key, season_url)."""
     r = await db.execute(
         select(Setting).where(
             Setting.user_id == user_id,
-            Setting.key.in_(["news_api_key", "external_data_enabled", "seasonality_data_url"]),
+            Setting.key.in_([
+                "news_api_key", "gnews_api_key", "mediastack_api_key", "guardian_api_key",
+                "external_data_enabled", "seasonality_data_url",
+            ]),
         )
     )
     rows = {s.key: s.value for s in r.scalars().all()}
     enabled = (rows.get("external_data_enabled") or "").strip().lower() in ("true", "1")
     news_key = (rows.get("news_api_key") or "").strip() or None
+    gnews_key = (rows.get("gnews_api_key") or "").strip() or None
+    mstack_key = (rows.get("mediastack_api_key") or "").strip() or None
+    guard_key = (rows.get("guardian_api_key") or "").strip() or None
     season_url = (rows.get("seasonality_data_url") or "").strip() or None
-    return enabled, news_key, season_url
+    return enabled, news_key, gnews_key, mstack_key, guard_key, season_url
 
 
 @router.get("/external-signals")
@@ -957,7 +970,7 @@ async def get_external_signals_endpoint(
     days: int = Query(7, ge=1, le=90, description="Period in days"),
 ):
     """External data signals (news, seasonality). Single country or batch. Uses Settings → Внешние данные."""
-    enabled, news_key, season_url = await _load_external_settings(db, current_user.id)
+    enabled, news_key, gnews_key, mstack_key, guard_key, season_url = await _load_external_settings(db, current_user.id)
     if not enabled:
         one = {"country": (country or "us").lower()[:2], "period_days": days, "sources_used": [], "news": None, "seasonality": None}
         return {"by_country": {one["country"]: one}} if countries else one
@@ -969,9 +982,19 @@ async def get_external_signals_endpoint(
             codes = ["us"]
         by_country = {}
         for c in codes:
-            by_country[c] = await fetch_signals(country_code=c, days=days, news_api_key=news_key, seasonality_data_url=season_url)
+            by_country[c] = await fetch_signals(
+                country_code=c, days=days,
+                news_api_key=news_key, gnews_api_key=gnews_key,
+                mediastack_api_key=mstack_key, guardian_api_key=guard_key,
+                seasonality_data_url=season_url,
+            )
         return {"by_country": by_country, "period_days": days}
-    one = await fetch_signals(country_code=country or "us", days=days, news_api_key=news_key, seasonality_data_url=season_url)
+    one = await fetch_signals(
+        country_code=country or "us", days=days,
+        news_api_key=news_key, gnews_api_key=gnews_key,
+        mediastack_api_key=mstack_key, guardian_api_key=guard_key,
+        seasonality_data_url=season_url,
+    )
     return one
 
 
@@ -1015,12 +1038,18 @@ async def get_offer_country_recommendations(
         recommendations.append({"country": g, "offer_count": offer_count_by_geo.get(g, 0), "our_clicks": our_clicks})
 
     # Внешние сигналы
-    enabled, news_key, season_url = await _load_external_settings(db, current_user.id)
-    if enabled and (news_key or season_url):
+    enabled, news_key, gnews_key, mstack_key, guard_key, season_url = await _load_external_settings(db, current_user.id)
+    any_news_rec = news_key or gnews_key or mstack_key or guard_key
+    if enabled and (any_news_rec or season_url):
         from app.services.external_data_service import get_external_signals as fetch_signals
         for rec in recommendations:
             g = rec["country"]
-            sig = await fetch_signals(country_code=g, days=days, news_api_key=news_key, seasonality_data_url=season_url)
+            sig = await fetch_signals(
+                country_code=g, days=days,
+                news_api_key=news_key, gnews_api_key=gnews_key,
+                mediastack_api_key=mstack_key, guardian_api_key=guard_key,
+                seasonality_data_url=season_url,
+            )
             rec["external_news_count"] = len(sig.get("news", {}).get("headlines") or [])
             rec["external_seasonality"] = bool(sig.get("seasonality") and "error" not in (sig.get("seasonality") or {}))
             rec["sources_used"] = sig.get("sources_used") or []

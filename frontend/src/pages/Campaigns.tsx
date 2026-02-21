@@ -65,6 +65,14 @@ export default function Campaigns() {
     queryFn: () => api.get(`/rules/campaign/${conversionCampaignId}/conversion`).then((r) => r.data),
     enabled: !!conversionCampaignId,
   });
+  const selCamp = campaigns?.find((c: Campaign) => c.id === conversionCampaignId);
+  const convLang = selCamp?.language || "ru";
+  const [presetIndex, setPresetIndex] = useState(0);
+  const { data: presets } = useQuery({
+    queryKey: ["rules-presets", convLang, presetIndex],
+    queryFn: () => api.get("/rules/presets", { params: { lang: convLang, index: presetIndex } }).then((r) => r.data),
+    enabled: !!conversionCampaignId,
+  });
   const { data: copyDoorways } = useQuery({
     queryKey: ["doorways", copyCampaignId],
     queryFn: () => api.get("/doorways/", { params: copyCampaignId ? { campaign_id: copyCampaignId } : {} }).then((r) => r.data),
@@ -280,7 +288,35 @@ export default function Campaigns() {
               <h2 className="text-lg font-medium text-white mb-3">Конверсия — кампания #{conversionCampaignId}
                 <button onClick={() => setConversionCampaignId(null)} className="ml-2 text-slate-400 hover:text-white text-sm">✕</button>
               </h2>
-              <p className="text-slate-400 text-sm mb-4">Тексты для дорвеев кампании: urgency, social proof, exit-intent попап, CTA по устройству.</p>
+              <p className="text-slate-400 text-sm mb-4">Тексты для дорвеев кампании: urgency, social proof, exit-intent попап, CTA по устройству. Если не заданы — подставляются психологические шаблоны по умолчанию.</p>
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => {
+                    if (!presets) return;
+                    setConvForm({
+                      urgency_text: presets.urgency_block?.text ?? "",
+                      social_stats: presets.social_proof?.stats ?? "",
+                      review1: (presets.social_proof?.reviews?.[0] as string) ?? "",
+                      review2: (presets.social_proof?.reviews?.[1] as string) ?? "",
+                      review3: (presets.social_proof?.reviews?.[2] as string) ?? "",
+                      exit_title: presets.exit_intent?.title ?? "",
+                      exit_cta: presets.exit_intent?.cta ?? "",
+                      cta_desktop: presets.cta_by_device?.desktop ?? "",
+                      cta_mobile: presets.cta_by_device?.mobile ?? "",
+                    });
+                  }}
+                  disabled={!presets}
+                  className="px-3 py-1.5 bg-violet-600/80 hover:bg-violet-600 disabled:opacity-50 rounded-lg text-white text-sm"
+                >
+                  Подставить шаблон #{presetIndex + 1}
+                </button>
+                <button
+                  onClick={() => setPresetIndex((p) => (p + 1) % 6)}
+                  className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 rounded-lg text-slate-300 text-sm"
+                >
+                  Другой вариант
+                </button>
+              </div>
               {conversionLoading ? (
                 <p className="text-slate-400">Загрузка...</p>
               ) : (
@@ -366,7 +402,22 @@ export default function Campaigns() {
                       <input type="checkbox" checked={rules.auto_rollback_on_cr_drop ?? false} onChange={(e) => updateRulesMut.mutate({ auto_rollback_on_cr_drop: e.target.checked })} />
                       Автооткат при падении CR
                     </label>
+                    <label className="flex items-center gap-2 text-slate-300" title="Бот видит SEO-версию, человек — конверсионную. Нужен Nginx map по User-Agent.">
+                      <input type="checkbox" checked={rules.cloaking_enabled ?? false} onChange={(e) => updateRulesMut.mutate({ cloaking_enabled: e.target.checked })} />
+                      Cloaking (бот / человек)
+                    </label>
                   </div>
+                  {rules.cloaking_enabled && (
+                    <div>
+                      <label className="block text-slate-400 text-sm mb-1">User-Agent для ботов (через запятую, для Nginx)</label>
+                      <input
+                        value={Array.isArray(rules.cloaking_bot_patterns) ? rules.cloaking_bot_patterns.join(", ") : (rules.cloaking_bot_patterns ?? "Googlebot, YandexBot, bingbot").toString()}
+                        onChange={(e) => updateRulesMut.mutate({ cloaking_bot_patterns: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                        placeholder="Googlebot, YandexBot, bingbot"
+                        className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-slate-400 text-sm mb-1">Порог отката (% падения CR)</label>
                     <input type="number" value={rules.rollback_threshold_percent ?? 15} onChange={(e) => updateRulesMut.mutate({ rollback_threshold_percent: parseFloat(e.target.value) || 15 })}
