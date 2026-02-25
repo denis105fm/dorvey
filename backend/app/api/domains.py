@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser
 from app.core.database import get_db
 from app.models.domain import Domain
+from app.models.campaign import Campaign
 from app.schemas.domain import DomainCreate, DomainUpdate, DomainResponse
 
 router = APIRouter()
@@ -41,6 +42,15 @@ async def create_domain(
     db.add(domain)
     await db.commit()
     await db.refresh(domain)
+    try:
+        from app.api.billing import notify_billing_limits_if_needed
+        if domain.campaign_id:
+            camp_r = await db.execute(select(Campaign).where(Campaign.id == domain.campaign_id))
+            c = camp_r.scalar_one_or_none()
+            if c:
+                await notify_billing_limits_if_needed(db, c.user_id)
+    except Exception:
+        pass
     return domain
 
 

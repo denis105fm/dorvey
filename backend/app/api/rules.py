@@ -30,6 +30,13 @@ class RulesBuilder(BaseModel):
     auto_generate_enabled: Optional[bool] = None
     cloaking_enabled: Optional[bool] = None
     cloaking_bot_patterns: Optional[list[str]] = None
+    # Auto-apply AI recommendations when CR/CTR below threshold
+    auto_apply_recommendations: Optional[bool] = None
+    auto_apply_cr_threshold_percent: Optional[float] = None
+    auto_apply_ctr_threshold_percent: Optional[float] = None
+    auto_apply_min_clicks: Optional[int] = None
+    auto_apply_min_impressions: Optional[int] = None
+    preferred_layout_index: Optional[int] = None  # A/B winner layout for new doorways
 
 
 async def _check(db, campaign_id: int, user_id: int):
@@ -80,6 +87,12 @@ async def get_rules(campaign_id: int, current_user: CurrentUser, db: AsyncSessio
         "auto_generate_enabled": rules.get("auto_generate_enabled", False),
         "cloaking_enabled": isinstance(cloaking, dict) and bool(cloaking.get("enabled")),
         "cloaking_bot_patterns": (isinstance(cloaking, dict) and cloaking.get("bot_patterns")) or default_bots,
+        "auto_apply_recommendations": ai_conf.get("auto_apply_recommendations", False),
+        "auto_apply_cr_threshold_percent": ai_conf.get("auto_apply_cr_threshold_percent"),
+        "auto_apply_ctr_threshold_percent": ai_conf.get("auto_apply_ctr_threshold_percent"),
+        "auto_apply_min_clicks": ai_conf.get("auto_apply_min_clicks"),
+        "auto_apply_min_impressions": ai_conf.get("auto_apply_min_impressions"),
+        "preferred_layout_index": ai_conf.get("preferred_layout_index"),
     }
 
 
@@ -117,6 +130,18 @@ async def update_rules(campaign_id: int, data: RulesBuilder, current_user: Curre
         if "cloaking" not in rules:
             rules["cloaking"] = {}
         rules["cloaking"] = {**(rules.get("cloaking") or {}), "bot_patterns": data.cloaking_bot_patterns}
+    if data.auto_apply_recommendations is not None:
+        rules["ai"]["auto_apply_recommendations"] = data.auto_apply_recommendations
+    if data.auto_apply_cr_threshold_percent is not None:
+        rules["ai"]["auto_apply_cr_threshold_percent"] = data.auto_apply_cr_threshold_percent
+    if data.auto_apply_ctr_threshold_percent is not None:
+        rules["ai"]["auto_apply_ctr_threshold_percent"] = data.auto_apply_ctr_threshold_percent
+    if data.auto_apply_min_clicks is not None:
+        rules["ai"]["auto_apply_min_clicks"] = data.auto_apply_min_clicks
+    if data.auto_apply_min_impressions is not None:
+        rules["ai"]["auto_apply_min_impressions"] = data.auto_apply_min_impressions
+    if "preferred_layout_index" in data.model_dump(exclude_unset=True):
+        rules["ai"]["preferred_layout_index"] = data.preferred_layout_index
     c.affiliate_rules = rules
     await db.commit()
     return {"status": "ok"}

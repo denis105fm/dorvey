@@ -37,7 +37,9 @@ jobs:
               git reset --hard origin/main
             fi
 
-            echo "Stopping containers (volumes preserved - NEVER use down -v, DB would be lost)..."
+            # Останавливаем контейнеры БЕЗ удаления томов. Никогда не использовать: docker compose down -v
+            # (флаг -v удалит volume postgres_data и все данные БД будут потеряны)
+            echo "Stopping containers (volumes preserved - never use down -v)..."
             docker compose -f docker-compose.prod.yml down
 
             echo "Building and starting..."
@@ -47,7 +49,9 @@ jobs:
               exit 1
             }
 
-            echo "Waiting for Postgres and backend (alembic upgrade head runs on backend start)..."
+            # Backend при старте выполняет: alembic upgrade head && uvicorn ...
+            # Миграции только добавляют новые таблицы/колонки, существующие данные не трогают.
+            echo "Waiting for Postgres and backend (migrations run on backend start)..."
             sleep 15
 
             echo "Container status:"
@@ -57,4 +61,3 @@ jobs:
             curl -sS "http://localhost:8085/api/health" > /dev/null || true
 
             echo "Deploy done. DB data is in volume postgres_data (persists across deploys)."
-            echo "Migrations run on backend start via CMD: alembic upgrade head (011 pause_reason, 012 offer description/restrictions, etc.)"

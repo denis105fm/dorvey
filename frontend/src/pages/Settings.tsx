@@ -48,6 +48,9 @@ const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
   { value: "doorway.rollback", label: "Откат" },
   { value: "doorway.anomaly", label: "Аномалия (падение CR)" },
   { value: "doorway.auto_paused", label: "Авто-пауза (убыточный дорвей)" },
+  { value: "doorway.auto_fix", label: "Авто-применение рекомендации" },
+  { value: "billing.near_limit", label: "Лимит ≈80%" },
+  { value: "billing.over_limit", label: "Превышен лимит" },
 ];
 
 export default function Settings() {

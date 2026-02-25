@@ -125,12 +125,20 @@ async def postback(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Postback from affiliate network. sub_id = doorway_id.
-    GET: ?sub_id=123&payout=10.5  or  POST with same query params.
+    Postback from affiliate network. sub_id = doorway_id or doorway_id_offer_id (for per-offer metrics).
+    GET: ?sub_id=123&payout=10.5  or  ?sub_id=123_45&payout=10.5 (offer 45).
     Bot filter: rejects if > 20 postbacks/min per doorway.
     """
+    offer_id = None
     try:
-        doorway_id = int(sub_id or "0")
+        raw = (sub_id or "").strip()
+        if "_" in raw:
+            parts = raw.split("_", 1)
+            doorway_id = int(parts[0] or "0")
+            if len(parts) > 1 and parts[1].isdigit():
+                offer_id = int(parts[1])
+        else:
+            doorway_id = int(raw or "0")
     except ValueError:
         return {"status": "ignored", "reason": "invalid sub_id"}
     if doorway_id > 0 and not _check_postback_rate(doorway_id):
@@ -162,6 +170,25 @@ async def postback(
             revenue=payout or 0,
         )
         db.add(m)
+    if offer_id and offer_id > 0:
+        from app.models.offer_metrics import OfferMetrics
+        from app.models.offer import Offer
+        r_offer = await db.execute(select(Offer).where(Offer.id == offer_id, Offer.campaign_id == dw.campaign_id))
+        if r_offer.scalar_one_or_none():
+            r3 = await db.execute(
+                select(OfferMetrics).where(
+                    OfferMetrics.offer_id == offer_id,
+                    OfferMetrics.date >= today,
+                    OfferMetrics.date < tomorrow,
+                )
+            )
+            om = r3.scalar_one_or_none()
+            if om:
+                om.conversions += 1
+                om.revenue += payout or 0
+            else:
+                om = OfferMetrics(offer_id=offer_id, date=today, conversions=1, revenue=payout or 0)
+                db.add(om)
     await db.commit()
     uid = None
     try:
@@ -247,11 +274,12 @@ async def click_redirect(
     vid: str | None = Query(None, alias="vid", description="visitor_id for remarketing"),
     geo: str | None = Query(None, description="Country code for GEO offer routing"),
     device: str | None = Query(None, description="mobile|desktop for device offer routing"),
+    oid: int | None = Query(None, alias="oid", description="offer_id when link was built with offer (for ROI metrics)"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Click tracking: redirect to affiliate URL with sub_id, increment DoorwayMetrics.clicks.
-    Use as CTA href when click_tracking_enabled and api_base_url are set.
+    Click tracking: redirect to affiliate URL with sub_id (doorway_id or doorway_id_offer_id).
+    Increment DoorwayMetrics.clicks and OfferMetrics.clicks when oid present.
     """
     doorway_id = dw
     r = await db.execute(
@@ -266,19 +294,21 @@ async def click_redirect(
     aff_url = camp.affiliate_url
     if not aff_url:
         raise HTTPException(status_code=400, detail="No affiliate URL")
-    from app.models.offer import Offer
+    from app.services.deploy import _append_sub_id, get_best_offer_url_by_roi
     off_r = await db.execute(
         select(Offer)
         .where(Offer.campaign_id == camp.id, Offer.is_active == True)
         .order_by(Offer.priority.desc())
     )
-    offers_list = [{"url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in off_r.scalars().all()]
+    offers_list = [{"id": o.id, "url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in off_r.scalars().all()]
+    chosen_offer_id = oid
     if offers_list:
-        from app.services.deploy import _get_best_offer_url
-        best = _get_best_offer_url(offers_list, geo=geo, device=device)
-        if best:
-            aff_url = best
-    target = _append_sub_id(aff_url, doorway_id)
+        best_url, best_oid = await get_best_offer_url_by_roi(db, offers_list, geo=geo, device=device)
+        if best_url:
+            aff_url = best_url
+            if chosen_offer_id is None:
+                chosen_offer_id = best_oid
+    target = _append_sub_id(aff_url, doorway_id, chosen_offer_id)
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     r2 = await db.execute(
         select(DoorwayMetrics).where(
@@ -293,11 +323,27 @@ async def click_redirect(
     else:
         m = DoorwayMetrics(doorway_id=doorway_id, date=today, clicks=1)
         db.add(m)
+    if chosen_offer_id and chosen_offer_id > 0:
+        from app.models.offer_metrics import OfferMetrics
+        tomorrow = today + timedelta(days=1)
+        r3 = await db.execute(
+            select(OfferMetrics).where(
+                OfferMetrics.offer_id == chosen_offer_id,
+                OfferMetrics.date >= today,
+                OfferMetrics.date < tomorrow,
+            )
+        )
+        om = r3.scalar_one_or_none()
+        if om:
+            om.clicks = (om.clicks or 0) + 1
+        else:
+            om = OfferMetrics(offer_id=chosen_offer_id, date=today, clicks=1)
+            db.add(om)
     if vid and len(vid) <= 64 and vid.replace("-", "").replace("_", "").isalnum():
         from app.models.visitor import VisitorEvent
         ev = VisitorEvent(
             visitor_id=vid, doorway_id=doorway_id, campaign_id=camp.id,
-            event_type="click", meta={"geo": geo, "device": device},
+            event_type="click", meta={"geo": geo, "device": device, "offer_id": chosen_offer_id},
         )
         db.add(ev)
     await db.commit()
