@@ -22,6 +22,7 @@ class Doorway(Base):
     content_variants = Column(JSONB, default=list)  # [{title, content, meta_description}, ...]
     status = Column(String(30), default="draft")  # draft, deployed, indexed, optimizing, paused
     pause_reason = Column(String(500), nullable=True)  # причина авто-паузы (например: мало выручки)
+    layout_index = Column(Integer, nullable=True)  # override A/B layout (0..N-1); null = compute from domain/path/id
     created_at = Column(DateTime, default=datetime.utcnow)
     deployed_at = Column(DateTime, nullable=True)
     indexed_at = Column(DateTime, nullable=True)
@@ -30,6 +31,7 @@ class Doorway(Base):
     domain = relationship("Domain", back_populates="doorways")
     versions = relationship("DoorwayVersion", back_populates="doorway", order_by="DoorwayVersion.created_at.desc()")
     metrics = relationship("DoorwayMetrics", back_populates="doorway")
+    source_metrics = relationship("DoorwaySourceMetrics", back_populates="doorway")
 
 
 class DoorwayVersion(Base):

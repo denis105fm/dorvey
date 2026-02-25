@@ -77,6 +77,10 @@ async def generate_doorway_content(
         cloaking = {}
         if result.get("faq_qa"):
             cloaking["faq_qa"] = result["faq_qa"]
+        camp = (await db.execute(select(Campaign).where(Campaign.id == data.campaign_id))).scalar_one_or_none()
+        preferred_layout = None
+        if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
+            preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
         dw = Doorway(
             campaign_id=data.campaign_id,
             domain_id=data.domain_id,
@@ -86,6 +90,7 @@ async def generate_doorway_content(
             meta_description=result.get("meta_description"),
             status="draft",
             cloaking_rules=cloaking if cloaking else None,
+            layout_index=preferred_layout if preferred_layout is not None else None,
         )
         db.add(dw)
         await db.commit()
@@ -100,6 +105,11 @@ async def generate_doorway_content(
         ver = DoorwayVersion(doorway_id=dw.id, content_snapshot=snap)
         db.add(ver)
         await db.commit()
+        try:
+            from app.api.billing import notify_billing_limits_if_needed
+            await notify_billing_limits_if_needed(db, current_user.id)
+        except Exception:
+            pass
     return DoorwayGenerateResponse(
         title=result.get("title", ""),
         meta_description=result.get("meta_description", ""),
@@ -137,6 +147,10 @@ async def generate_batch(
             continue
         doorway_id = None
         try:
+            camp = (await db.execute(select(Campaign).where(Campaign.id == item.campaign_id))).scalar_one_or_none()
+            preferred_layout = None
+            if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
+                preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
             dw = Doorway(
                 campaign_id=item.campaign_id,
                 domain_id=item.domain_id,
@@ -145,6 +159,7 @@ async def generate_batch(
                 content=gen_result.get("content"),
                 meta_description=gen_result.get("meta_description"),
                 status="draft",
+                layout_index=preferred_layout if preferred_layout is not None else None,
             )
             db.add(dw)
             await db.flush()
@@ -158,6 +173,12 @@ async def generate_batch(
         except Exception as ex:
             results.append({"keyword": item.keyword, "status": "error", "error": str(ex)})
     await db.commit()
+    if created > 0:
+        try:
+            from app.api.billing import notify_billing_limits_if_needed
+            await notify_billing_limits_if_needed(db, current_user.id)
+        except Exception:
+            pass
     return DoorwayBatchGenerateResponse(created=created, results=results)
 
 
@@ -170,10 +191,22 @@ async def create_doorway(
     ok = await _check_campaign_access(db, data.campaign_id, current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    doorway = Doorway(**data.model_dump())
+    camp = (await db.execute(select(Campaign).where(Campaign.id == data.campaign_id))).scalar_one_or_none()
+    preferred_layout = None
+    if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
+        preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
+    dump = data.model_dump()
+    if preferred_layout is not None:
+        dump["layout_index"] = preferred_layout
+    doorway = Doorway(**dump)
     db.add(doorway)
     await db.commit()
     await db.refresh(doorway)
+    try:
+        from app.api.billing import notify_billing_limits_if_needed
+        await notify_billing_limits_if_needed(db, current_user.id)
+    except Exception:
+        pass
     return doorway
 
 

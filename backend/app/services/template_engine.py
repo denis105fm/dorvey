@@ -144,6 +144,7 @@ def render_doorway_page(
     trust_elements: Optional[str] = None,
     comparison_table: Optional[str] = None,
     structural_seed: Optional[tuple] = None,
+    layout_index_override: Optional[int] = None,
     cta_desktop: Optional[str] = None,
     cta_mobile: Optional[str] = None,
     urgency_block: Optional[str] = None,
@@ -176,7 +177,10 @@ def render_doorway_page(
     if structural_seed:
         domain, path, _dw_id = structural_seed
         block_order = shuffle_block_order(domain, path, _dw_id, block_order)
-        layout_idx = get_layout_variant(domain, path, _dw_id, len(LAYOUT_CSS_VARIANTS))
+        if layout_index_override is not None and 0 <= layout_index_override < len(LAYOUT_CSS_VARIANTS):
+            layout_idx = layout_index_override
+        else:
+            layout_idx = get_layout_variant(domain, path, _dw_id, len(LAYOUT_CSS_VARIANTS))
         css_variant = LAYOUT_CSS_VARIANTS[layout_idx]
 
     main_content = _build_main_content(
@@ -375,7 +379,7 @@ var esc2=false;window.addEventListener('scroll',function(){{if(esc2)return;var h
         base_esc = analytics_base.replace("\\", "\\\\").replace("'", "\\'")
         visitor_script = f"""<script>(function(){{var vid=localStorage.getItem('dv_vid');if(!vid){{vid='v_'+Math.random().toString(36).slice(2)+Date.now();localStorage.setItem('dv_vid',vid)}}var dw='{dw_id_visitor}';var base='{base_esc}';var i=new Image();i.src=base+'/api/analytics/visit?dw='+dw+'&vid='+encodeURIComponent(vid);function addVidToLinks(){{var links=document.querySelectorAll('a.cta,a.btn-cta,a.action-btn,a.link-cta,a.exit-cta,.cta-footer-btn');links.forEach(function(a){{if(a.href.indexOf('analytics/click')>=0){{try{{var u=new URL(a.href);if(!u.searchParams.get('vid'))u.searchParams.set('vid',vid);a.href=u.toString()}}catch(e){{}}}}}})}}addVidToLinks();document.addEventListener('DOMContentLoaded',addVidToLinks);setTimeout(addVidToLinks,500)}})();</script>"""
     # Device + geo detection + GEO/device offer selection
-    device_script = """<script>(function(){var m=/iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)||(window.innerWidth<768);document.body.classList.add(m?'device-mobile':'device-desktop');var d=m?'mobile':'desktop';function pickOffer(geo){var ob=document.body.getAttribute('data-offers');var dw=document.body.getAttribute('data-doorway-id');if(!ob||!dw)return;try{var offers=JSON.parse(ob);var best=null;for(var i=0;i<offers.length;i++){var o=offers[i];if(o.geo&&geo&&o.geo.toUpperCase()!==geo)continue;if(o.device&&o.device.toLowerCase()!==d)continue;best=o.url;break}if(!best&&offers.length)best=offers[0].url;var links=document.querySelectorAll('a.cta,a.btn-cta,a.action-btn,a.link-cta,a.exit-cta,.cta-footer-btn');if(links.length&&links[0].href.indexOf('analytics/click')>=0){try{var u=new URL(links[0].href);u.searchParams.set('geo',geo||'');u.searchParams.set('device',d);links.forEach(function(a){a.href=u.toString()})}catch(e){}}else if(best){var sep=best.indexOf('?')>=0?'&':'?';var u=best+sep+'sub_id='+dw;links.forEach(function(a){a.href=u})}}catch(e){}}fetch('https://ipapi.co/json/').then(function(r){return r.json();}).then(function(j){if(j&&j.country_code){document.body.classList.add('geo-'+j.country_code.toUpperCase());pickOffer(j.country_code.toUpperCase())}else pickOffer()}).catch(function(){pickOffer()})})();</script>"""
+    device_script = """<script>(function(){var m=/iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)||(window.innerWidth<768);document.body.classList.add(m?'device-mobile':'device-desktop');var d=m?'mobile':'desktop';function pickOffer(geo){var ob=document.body.getAttribute('data-offers');var dw=document.body.getAttribute('data-doorway-id');if(!ob||!dw)return;try{var offers=JSON.parse(ob);var best=null;var bestId=null;for(var i=0;i<offers.length;i++){var o=offers[i];if(o.geo&&geo&&o.geo.toUpperCase()!==geo)continue;if(o.device&&o.device.toLowerCase()!==d)continue;best=o.url;bestId=o.id!=null?o.id:null;break}if(!best&&offers.length){best=offers[0].url;bestId=offers[0].id!=null?offers[0].id:null}var links=document.querySelectorAll('a.cta,a.btn-cta,a.action-btn,a.link-cta,a.exit-cta,.cta-footer-btn');if(links.length&&links[0].href.indexOf('analytics/click')>=0){try{var u=new URL(links[0].href);u.searchParams.set('geo',geo||'');u.searchParams.set('device',d);if(bestId!=null)u.searchParams.set('oid',String(bestId));try{var pu=new URL(window.location.href);var utm=pu.searchParams.get('utm_source')||pu.searchParams.get('src');if(utm)u.searchParams.set('utm_source',utm)}catch(e){}links.forEach(function(a){a.href=u.toString()})}catch(e){}}else if(best){var sep=best.indexOf('?')>=0?'&':'?';var sid=bestId!=null?dw+'_'+bestId:dw;var u=best+sep+'sub_id='+sid;links.forEach(function(a){a.href=u})}}catch(e){}}fetch('https://ipapi.co/json/').then(function(r){return r.json();}).then(function(j){if(j&&j.country_code){document.body.classList.add('geo-'+j.country_code.toUpperCase());pickOffer(j.country_code.toUpperCase())}else pickOffer()}).catch(function(){pickOffer()})})();</script>"""
     if "</body>" in html:
         to_inject = visitor_script + "\n" + device_script if visitor_script else device_script
         html = html.replace("</body>", f"{to_inject}\n</body>", 1)

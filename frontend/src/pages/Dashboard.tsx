@@ -44,6 +44,10 @@ export default function Dashboard() {
     queryKey: ["analytics-campaigns", 30],
     queryFn: () => api.get("/analytics/campaigns", { params: { days: 30 } }).then((r) => r.data),
   });
+  const { data: earlyDoorways } = useQuery({
+    queryKey: ["analytics-early-doorways", 3, 20],
+    queryFn: () => api.get("/analytics/early-doorways", { params: { days: 3, min_clicks: 20 } }).then((r) => r.data),
+  });
   const [affKeyword, setAffKeyword] = useState("");
   const affRecMut = useMutation({
     mutationFn: (kw: string) =>
@@ -95,6 +99,17 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
+
+      {earlyDoorways?.doorways?.length > 0 && (
+        <Link to="/doorways" className="block mb-4">
+          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/15 transition-colors">
+            <p className="text-amber-200 font-medium">
+              Первые 48 ч: {earlyDoorways.doorways.length} дорвеев без конверсий за 3 дня
+            </p>
+            <p className="text-slate-400 text-sm mt-1">Перейти к списку →</p>
+          </div>
+        </Link>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {cards.map(({ label, value, icon: Icon, color, to }, i) => (

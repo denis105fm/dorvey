@@ -27,3 +27,4 @@ class Offer(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     campaign = relationship("Campaign", back_populates="offers")
+    metrics = relationship("OfferMetrics", back_populates="offer")

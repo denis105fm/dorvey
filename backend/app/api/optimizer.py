@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core.database import get_db
 from app.models.doorway import Doorway
 from app.models.campaign import Campaign
+from app.models.domain import Domain
 
 from app.services.ai_optimizer import (
     get_recommendations,
@@ -251,6 +252,60 @@ async def campaign_copy_cloaking_from_winner(
     except Exception:
         pass
     return {"status": "ok", "message": f"Настройки скопированы с дорвея #{source_id}"}
+
+
+class CloneToDomainRequest(BaseModel):
+    domain_id: int
+    path: str = "/"
+
+
+@router.post("/doorway/{doorway_id}/clone-to-domain")
+async def doorway_clone_to_domain(
+    doorway_id: int,
+    data: CloneToDomainRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Клонировать победителя на другой домен: создать новый дорвей с тем же контентом, cloaking и layout.
+    Возвращает id нового дорвея (status=draft).
+    """
+    if not await _check_access(db, doorway_id, current_user.id):
+        raise HTTPException(404, "Doorway not found")
+    r = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    row = r.first()
+    if not row:
+        raise HTTPException(404, "Doorway not found")
+    src, camp = row
+    dom = (await db.execute(select(Domain).where(Domain.id == data.domain_id))).scalar_one_or_none()
+    if not dom:
+        raise HTTPException(404, "Domain not found")
+    path = (data.path or "/").strip() or "/"
+    existing = (await db.execute(
+        select(Doorway).where(Doorway.domain_id == data.domain_id, Doorway.path == path)
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, f"Дорвей на этом домене с путём {path} уже существует")
+    new_dw = Doorway(
+        campaign_id=src.campaign_id,
+        domain_id=data.domain_id,
+        path=path,
+        title=src.title,
+        content=src.content,
+        meta_description=src.meta_description,
+        cloaking_rules=dict(src.cloaking_rules or {}),
+        content_variants=list(src.content_variants or []),
+        layout_index=src.layout_index,
+        status="draft",
+    )
+    db.add(new_dw)
+    await db.commit()
+    await db.refresh(new_dw)
+    return {"status": "ok", "doorway_id": new_dw.id, "message": f"Дорвей клонирован: #{new_dw.id} на {dom.domain}{path}"}
 
 
 @router.get("/anomalies")

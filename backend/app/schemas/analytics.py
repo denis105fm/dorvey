@@ -103,3 +103,20 @@ class AnalyticsDoorwaysMetricsResponse(BaseModel):
     doorways: list[DoorwayProfitMetric]
     min_clicks_used: int
     external_signals_by_country: dict | None = None  # гео -> { news, seasonality, sources_used }
+
+
+class EarlyDoorwayItem(BaseModel):
+    """Дорвей за последние N дней с трафиком, но без конверсий."""
+    doorway_id: int
+    campaign_id: int
+    title: Optional[str] = None
+    clicks: int
+    conversions: int = 0
+    revenue: float = 0
+    deployed_at: Optional[datetime] = None
+
+
+class EarlyDoorwaysResponse(BaseModel):
+    doorways: list[EarlyDoorwayItem]
+    days: int
+    min_clicks: int

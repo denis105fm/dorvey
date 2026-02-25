@@ -174,13 +174,21 @@ def run_certbot_ssl(server: Server, domain: str, webroot: str = "/var/www/html")
         return False, str(e)
 
 
-def _append_sub_id(url: str, doorway_id: int) -> str:
-    """Add sub_id=doorway_id to affiliate URL for postback attribution.
-    Supports placeholders {sub_id}, {doorway_id}. Otherwise appends query param.
+def _append_sub_id(url: str, doorway_id: int, offer_id: Optional[int] = None, source: Optional[str] = None) -> str:
+    """Add sub_id to affiliate URL for postback attribution.
+    If offer_id is set: sub_id=doorway_id_offer_id (for per-offer metrics).
+    If source is set: append _source (e.g. doorway_id_offer_id_google).
+    Otherwise: sub_id=doorway_id (backward compatible).
+    Supports placeholders {sub_id}, {doorway_id}.
     """
     if not url or doorway_id <= 0:
         return url
-    sid = str(doorway_id)
+    if offer_id is not None and offer_id > 0:
+        sid = f"{doorway_id}_{offer_id}"
+    else:
+        sid = str(doorway_id)
+    if source and len(source) <= 32 and source.replace("_", "").replace("-", "").isalnum():
+        sid = f"{sid}_{source}"
     if "{sub_id}" in url:
         return url.replace("{sub_id}", sid)
     if "{doorway_id}" in url:
@@ -193,10 +201,10 @@ def _append_sub_id(url: str, doorway_id: int) -> str:
 
 
 def _get_best_offer_url(offers: list, geo: Optional[str] = None, device: Optional[str] = None):
-    """Pick best offer by geo/device. Returns URL or None."""
+    """Pick best offer by priority and geo/device. Returns URL or None."""
     if not offers:
         return None
-    for o in sorted(offers, key=lambda x: -(x.priority or 0)):
+    for o in sorted(offers, key=lambda x: -(x.get("priority") or 0)):
         if not o.get("is_active", True):
             continue
         og, od = o.get("geo"), o.get("device")
@@ -206,6 +214,66 @@ def _get_best_offer_url(offers: list, geo: Optional[str] = None, device: Optiona
             continue
         return o.get("url")
     return offers[0].get("url") if offers else None
+
+
+async def get_best_offer_url_by_roi(
+    db: AsyncSession,
+    offers: list,
+    geo: Optional[str] = None,
+    device: Optional[str] = None,
+    days: int = 30,
+) -> tuple[Optional[str], Optional[int]]:
+    """
+    Pick best offer by ROI (revenue/clicks) when we have enough data, else by priority.
+    offers must have keys: id, url, geo, device, priority, is_active.
+    Returns (url, offer_id) or (None, None).
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+
+    from app.models.offer_metrics import OfferMetrics
+
+    if not offers:
+        return None, None
+    filtered = []
+    for o in offers:
+        if not o.get("is_active", True):
+            continue
+        og, od = o.get("geo"), o.get("device")
+        if geo and og and geo.upper() != og.upper():
+            continue
+        if device and od and device.lower() != od.lower():
+            continue
+        filtered.append(o)
+    if not filtered:
+        return None, None
+
+    since = datetime.utcnow() - timedelta(days=days)
+    offer_ids = [o["id"] for o in filtered if o.get("id")]
+    if not offer_ids:
+        best = max(filtered, key=lambda x: (x.get("priority") or 0))
+        return best.get("url"), best.get("id")
+
+    r = await db.execute(
+        select(
+            OfferMetrics.offer_id,
+            func.coalesce(func.sum(OfferMetrics.clicks), 0).label("clk"),
+            func.coalesce(func.sum(OfferMetrics.revenue), 0).label("rev"),
+        )
+        .where(OfferMetrics.offer_id.in_(offer_ids), OfferMetrics.date >= since)
+        .group_by(OfferMetrics.offer_id)
+    )
+    rows = {row.offer_id: (int(row.clk or 0), float(row.rev or 0)) for row in r.all()}
+
+    def roi(o):
+        oid = o.get("id")
+        clk, rev = rows.get(oid, (0, 0))
+        if clk >= 5:
+            return (rev / clk if clk else 0, clk, o.get("priority") or 0)
+        return (-1, clk, o.get("priority") or 0)
+
+    best = max(filtered, key=roi)
+    return best.get("url"), best.get("id")
 
 
 async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool = False) -> Optional[str]:
@@ -232,11 +300,17 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         select(Offer).where(Offer.campaign_id == camp.id, Offer.is_active == True).order_by(Offer.priority.desc())
     )
     offers_raw = off_r.scalars().all()
-    offers = [{"url": o.url, "name": o.name, "rate": o.rate, "amount": o.amount, "term": o.term, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in offers_raw]
+    offers = [{"id": o.id, "url": o.url, "name": o.name, "rate": o.rate, "amount": o.amount, "term": o.term, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in offers_raw]
     aff_url = camp.affiliate_url
+    best_offer_id = None
     if offers:
-        aff_url = _get_best_offer_url(offers) or aff_url
-    aff_url_with_sub = _append_sub_id(aff_url, dw.id) if aff_url else None
+        aff_url_candidate, best_offer_id = await get_best_offer_url_by_roi(db, offers, None, None)
+        if aff_url_candidate:
+            aff_url = aff_url_candidate
+        else:
+            aff_url = _get_best_offer_url(offers) or aff_url
+            best_offer_id = next((o["id"] for o in offers if o.get("url") == aff_url), None)
+    aff_url_with_sub = _append_sub_id(aff_url, dw.id, best_offer_id) if aff_url else None
 
     click_base = None
     click_enabled = False
@@ -272,6 +346,8 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     cta_href = aff_url_with_sub
     if click_enabled and click_base and aff_url_with_sub:
         cta_href = f"{click_base}/api/analytics/click?dw={dw.id}"
+        if best_offer_id:
+            cta_href += f"&oid={best_offer_id}"
 
     canonical = f"https://{dom.domain}{dw.path}" if dw.path != "/" else f"https://{dom.domain}"
     # Load user settings: heatmaps, exit-intent, trust
@@ -376,7 +452,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     data_offers = None
     if len(offers) >= 2 and any(o.get("geo") or o.get("device") for o in offers):
         import json
-        data_offers = json.dumps([{"url": o["url"], "geo": o.get("geo"), "device": o.get("device")} for o in offers])
+        data_offers = json.dumps([{"id": o.get("id"), "url": o["url"], "geo": o.get("geo"), "device": o.get("device")} for o in offers])
 
     social_proof_block = None
     sp = (dw.cloaking_rules or {}).get("social_proof") or camp_settings.get("social_proof")
@@ -409,10 +485,12 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
 
     comparison_table = None
     offers_for_table = [o for o in offers if o.get("name") or o.get("rate") or o.get("amount") or o.get("term")]
+    if not offers_for_table and offers:
+        offers_for_table = [dict(o, name=o.get("name") or f"Вариант {i+1}") for i, o in enumerate(offers[:5])]
     if offers_for_table:
         rows = []
         for o in offers_for_table[:5]:
-            url_with_sub = _append_sub_id(o["url"], dw.id)
+            url_with_sub = _append_sub_id(o["url"], dw.id, o.get("id"))
             name = html.escape((o.get("name") or "").strip() or "—")
             rate = html.escape((o.get("rate") or "").strip() or "—")
             amount = html.escape((o.get("amount") or "").strip() or "—")
@@ -444,6 +522,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         trust_elements=trust_html,
         faq_schema=faq_schema or None,
         structural_seed=(domain, path, dw.id),
+        layout_index_override=getattr(dw, "layout_index", None),
         cta_desktop=cta_desktop,
         cta_mobile=cta_mobile,
         comparison_table=comparison_table,

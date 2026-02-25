@@ -47,7 +47,10 @@ const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
   { value: "doorway.conversion", label: "Конверсия" },
   { value: "doorway.rollback", label: "Откат" },
   { value: "doorway.anomaly", label: "Аномалия (падение CR)" },
-  { value: "doorway.auto_paused", label: "Авто-пауза (убыточный дорвей)" },
+  { value: "doorway.auto_paused", label: "Авто-пауза (убыточный / ранний стоп 2–3 дн.)" },
+  { value: "doorway.auto_fix", label: "Авто-применение рекомендации" },
+  { value: "billing.near_limit", label: "Лимит ≈80%" },
+  { value: "billing.over_limit", label: "Превышен лимит" },
 ];
 
 export default function Settings() {
@@ -786,8 +789,20 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Cron</h2>
           </div>
           <p className="text-slate-400 text-sm mb-2">
-            Вызывайте раз в день (через cron или внешний планировщик):
+            Вызывайте раз в день (через cron или внешний планировщик). Либо один вызов <code className="text-emerald-400">POST /api/cron/run-all</code> — выполнит все задачи ниже, включая ранний стоп.
           </p>
+          <div className="space-y-2 mb-2">
+            <code className="block p-3 bg-slate-900 rounded text-emerald-400 text-sm">
+              POST /api/cron/early-pause-24h?min_clicks=50
+            </code>
+            <span className="text-slate-500 text-xs">Ранний стоп за 24 ч: пауза при 0 конверсий и ≥50 кликов за сутки</span>
+          </div>
+          <div className="space-y-2 mb-2">
+            <code className="block p-3 bg-slate-900 rounded text-emerald-400 text-sm">
+              POST /api/cron/early-pause-no-conversions?min_days=2&min_clicks=30
+            </code>
+            <span className="text-slate-500 text-xs">Ранний стоп: пауза дорвеев за 2–3 дня с трафиком, но 0 конверсий (прибыль на 2–3 день)</span>
+          </div>
           <div className="space-y-2 mb-2">
             <code className="block p-3 bg-slate-900 rounded text-emerald-400 text-sm">
               POST /api/cron/auto-rollback?threshold_percent=15&min_days=7

@@ -16,6 +16,7 @@ class DoorwayBase(BaseModel):
     cloaking_rules: Optional[dict[str, Any]] = None
     content_variants: Optional[list[dict[str, Any]]] = None
     status: str = "draft"
+    layout_index: Optional[int] = None
 
 
 class DoorwayCreate(DoorwayBase):
@@ -29,6 +30,7 @@ class DoorwayUpdate(BaseModel):
     meta_description: Optional[str] = None
     cloaking_rules: Optional[dict[str, Any]] = None
     status: Optional[str] = None
+    layout_index: Optional[int] = None
 
 
 class DoorwayBatchItem(BaseModel):

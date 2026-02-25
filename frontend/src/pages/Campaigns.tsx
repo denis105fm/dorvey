@@ -121,6 +121,11 @@ export default function Campaigns() {
     mutationFn: (data: Record<string, unknown>) => api.put(`/rules/campaign/${rulesCampaignId}`, data).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules", rulesCampaignId] }); toast.success("Правила сохранены"); },
   });
+  const setPreferredLayoutMut = useMutation({
+    mutationFn: ({ campaignId, layoutIndex }: { campaignId: number; layoutIndex: number }) =>
+      api.put(`/rules/campaign/${campaignId}`, { preferred_layout_index: layoutIndex }).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); toast.success("Layout будет использоваться для новых дорвеев"); },
+  });
   const updateConversionMut = useMutation({
     mutationFn: (data: Record<string, unknown>) => api.put(`/rules/campaign/${conversionCampaignId}/conversion`, data).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["conversion", conversionCampaignId] }); toast.success("Настройки конверсии сохранены"); },
@@ -262,7 +267,16 @@ export default function Campaigns() {
                 <div className="space-y-2 text-slate-300 text-sm">
                   <p>{abWinner.message}</p>
                   {abWinner.winner !== null && (
-                    <p className="text-emerald-400">Лучший layout: {abWinner.winner} (CR: {abWinner.winner_cr}%, revenue: {abWinner.winner_revenue?.toFixed(2)})</p>
+                    <>
+                      <p className="text-emerald-400">Лучший layout: {abWinner.winner} (CR: {abWinner.winner_cr}%, revenue: {abWinner.winner_revenue?.toFixed(2)})</p>
+                      <button
+                        onClick={() => abCampaignId != null && setPreferredLayoutMut.mutate({ campaignId: abCampaignId, layoutIndex: abWinner.winner })}
+                        disabled={setPreferredLayoutMut.isPending}
+                        className="px-3 py-1.5 bg-amber-600/80 hover:bg-amber-600 disabled:opacity-50 rounded-lg text-white text-sm"
+                      >
+                        Использовать для новых дорвеев
+                      </button>
+                    </>
                   )}
                   {abWinner.variants?.length > 0 && (
                     <ul className="mt-2 space-y-1">
@@ -422,6 +436,60 @@ export default function Campaigns() {
                     <label className="block text-slate-400 text-sm mb-1">Порог отката (% падения CR)</label>
                     <input type="number" value={rules.rollback_threshold_percent ?? 15} onChange={(e) => updateRulesMut.mutate({ rollback_threshold_percent: parseFloat(e.target.value) || 15 })}
                       className="w-32 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                  </div>
+                  {(rules.preferred_layout_index !== undefined && rules.preferred_layout_index !== null) && (
+                    <p className="text-slate-400 text-sm">
+                      Layout для новых дорвеев: <span className="text-amber-400">{rules.preferred_layout_index}</span>
+                      <button type="button" onClick={() => updateRulesMut.mutate({ preferred_layout_index: null })} className="ml-2 text-slate-500 hover:text-white text-xs">Сбросить</button>
+                    </p>
+                  )}
+                  <div className="border-t border-slate-600 pt-3 mt-3">
+                    <h3 className="text-slate-300 font-medium mb-2">Авто-применение рекомендаций AI</h3>
+                    <p className="text-slate-400 text-xs mb-2">Cron при CR/CTR ниже порога вызывает AI-рекомендации и применяет первую (title/meta/content). Нужен OpenAI в Настройках.</p>
+                    <label className="flex items-center gap-2 text-slate-300 mb-3">
+                      <input type="checkbox" checked={rules.auto_apply_recommendations ?? false} onChange={(e) => updateRulesMut.mutate({ auto_apply_recommendations: e.target.checked })} />
+                      Включить авто-применение
+                    </label>
+                    {(rules.auto_apply_recommendations ?? false) && (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Порог CR (%) — применять если ниже</label>
+                          <input type="number" step={0.1} value={rules.auto_apply_cr_threshold_percent ?? 1.5} onChange={(e) => updateRulesMut.mutate({ auto_apply_cr_threshold_percent: parseFloat(e.target.value) || 1.5 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Порог CTR (%) — применять если ниже</label>
+                          <input type="number" step={0.1} value={rules.auto_apply_ctr_threshold_percent ?? 2} onChange={(e) => updateRulesMut.mutate({ auto_apply_ctr_threshold_percent: parseFloat(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Мин. кликов за период</label>
+                          <input type="number" value={rules.auto_apply_min_clicks ?? 30} onChange={(e) => updateRulesMut.mutate({ auto_apply_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Мин. показов</label>
+                          <input type="number" value={rules.auto_apply_min_impressions ?? 100} onChange={(e) => updateRulesMut.mutate({ auto_apply_min_impressions: parseInt(e.target.value) || 100 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-slate-600 pt-3 mt-3">
+                    <h3 className="text-slate-300 font-medium mb-2">Ранний стоп (прибыль на 2–3 день)</h3>
+                    <p className="text-slate-400 text-xs mb-2">Автопауза дорвеев, задеплоенных недавно: есть трафик, но 0 конверсий. Крон run-all вызывает это правило.</p>
+                    <label className="flex items-center gap-2 text-slate-300 mb-3">
+                      <input type="checkbox" checked={rules.early_pause_enabled !== false} onChange={(e) => updateRulesMut.mutate({ early_pause_enabled: e.target.checked })} />
+                      Включить ранний стоп
+                    </label>
+                    {(rules.early_pause_enabled !== false) && (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Период (дней) — дорвеи задеплоены за</label>
+                          <input type="number" min={1} max={7} value={rules.early_pause_min_days ?? 2} onChange={(e) => updateRulesMut.mutate({ early_pause_min_days: parseInt(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Мин. кликов — паузить если 0 конверсий при ≥</label>
+                          <input type="number" min={10} max={200} value={rules.early_pause_min_clicks ?? 30} onChange={(e) => updateRulesMut.mutate({ early_pause_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "../api/client";
@@ -40,13 +41,17 @@ export default function Doorways() {
   const [result, setResult] = useState<{ html?: string; doorway_id?: number; validation_violations?: string[] } | null>(null);
   const [recsDoorwayId, setRecsDoorwayId] = useState<number | null>(null);
   const [panelDoorwayId, setPanelDoorwayId] = useState<number | null>(null);
-  const [panelType, setPanelType] = useState<"quality" | "predict" | "broken" | null>(null);
+  const [panelType, setPanelType] = useState<"quality" | "predict" | "broken" | "forecast" | null>(null);
   const [variantsDoorwayId, setVariantsDoorwayId] = useState<number | null>(null);
   const [filterCampaign, setFilterCampaign] = useState<string>("");
   const [filterDomain, setFilterDomain] = useState<string>("");
   const [filterProfit, setFilterProfit] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState<"" | "health" | "revenue">("");
+  const [cloneDoorwayId, setCloneDoorwayId] = useState<number | null>(null);
+  const [cloneDomainId, setCloneDomainId] = useState<number>(0);
+  const [clonePath, setClonePath] = useState("/");
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -68,6 +73,10 @@ export default function Doorways() {
   const { data: doorwaysMetrics } = useQuery({
     queryKey: ["analytics-doorways-metrics", 30],
     queryFn: () => api.get("/analytics/doorways-metrics", { params: { days: 30 } }).then((r) => r.data),
+  });
+  const { data: earlyDoorways } = useQuery({
+    queryKey: ["analytics-early-doorways", 3, 20],
+    queryFn: () => api.get("/analytics/early-doorways", { params: { days: 3, min_clicks: 20 } }).then((r) => r.data),
   });
   const metricsByDoorway = useMemo(() => {
     const map = new Map<number, DoorwayMetric>();
@@ -178,6 +187,16 @@ export default function Doorways() {
     queryFn: () => api.get(`/broken-links/doorway/${panelDoorwayId}`).then((r) => r.data),
     enabled: !!panelDoorwayId && panelType === "broken",
   });
+  const { data: profitForecast } = useQuery({
+    queryKey: ["profit-forecast", panelDoorwayId],
+    queryFn: () => api.get(`/analytics/doorway/${panelDoorwayId}/profit-forecast?days=7`).then((r) => r.data),
+    enabled: !!panelDoorwayId && panelType === "forecast",
+  });
+  const { data: trafficBySource } = useQuery({
+    queryKey: ["traffic-by-source", panelDoorwayId],
+    queryFn: () => api.get(`/analytics/doorway/${panelDoorwayId}/traffic-by-source?days=30`).then((r) => r.data),
+    enabled: !!panelDoorwayId && panelType === "sources",
+  });
   const repairMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: { broken_urls: string[]; replacement?: string } }) =>
       api.post(`/broken-links/doorway/${id}/repair`, data).then((r) => r.data),
@@ -205,8 +224,28 @@ export default function Doorways() {
     },
     onError: () => toast.error("Ошибка применения варианта"),
   });
+  const pauseDoorwayMut = useMutation({
+    mutationFn: (id: number) => api.patch(`/doorways/${id}`, { status: "paused" }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      qc.invalidateQueries({ queryKey: ["analytics-early-doorways"] });
+      toast.success("Дорвей поставлен на паузу");
+    },
+    onError: () => toast.error("Ошибка"),
+  });
+  const cloneToDomainMut = useMutation({
+    mutationFn: ({ id, domain_id, path }: { id: number; domain_id: number; path: string }) =>
+      api.post(`/optimizer/doorway/${id}/clone-to-domain`, { domain_id, path }).then((r) => r.data),
+    onSuccess: (data: { doorway_id: number; message?: string }) => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      setCloneDoorwayId(null);
+      toast.success(data.message || `Дорвей клонирован: #${data.doorway_id}`);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
 
-  const openPanel = (id: number, type: "quality" | "predict" | "broken") => {
+  const openPanel = (id: number, type: "quality" | "predict" | "broken" | "forecast" | "sources") => {
     setPanelDoorwayId(id);
     setPanelType(type);
   };
@@ -242,6 +281,48 @@ export default function Doorways() {
           {showGenerate ? "Скрыть" : "Сгенерировать"}
         </Button>
       </div>
+
+      {earlyDoorways?.doorways?.length > 0 && (
+        <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+          <h2 className="text-lg font-medium text-amber-200 mb-2">Первые 48 ч — без конверсий</h2>
+          <p className="text-slate-400 text-sm mb-3">
+            За последние {earlyDoorways.days} дн. задеплоены, трафик ≥{earlyDoorways.min_clicks} кликов, 0 конверсий. Поставьте на паузу или смените оффер в кампании.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-600">
+                  <th className="text-left py-2 text-slate-400 font-medium">ID</th>
+                  <th className="text-left py-2 text-slate-400 font-medium">Кампания</th>
+                  <th className="text-left py-2 text-slate-400 font-medium">Заголовок</th>
+                  <th className="text-left py-2 text-slate-400 font-medium">Клики</th>
+                  <th className="text-right py-2 text-slate-400 font-medium">Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(earlyDoorways.doorways as { doorway_id: number; campaign_id: number; title?: string; clicks: number }[]).map((row) => (
+                  <tr key={row.doorway_id} className="border-b border-slate-700/50">
+                    <td className="py-2 text-white">{row.doorway_id}</td>
+                    <td className="py-2 text-slate-300">{campaignName(row.campaign_id)}</td>
+                    <td className="py-2 text-slate-400 truncate max-w-[200px]">{row.title || "—"}</td>
+                    <td className="py-2 text-amber-400">{row.clicks}</td>
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={() => pauseDoorwayMut.mutate(row.doorway_id)}
+                        disabled={pauseDoorwayMut.isPending}
+                        className="mr-2 px-2 py-1 bg-slate-600 hover:bg-slate-500 rounded text-white text-xs"
+                      >
+                        Пауза
+                      </button>
+                      <Link to={`/offers?campaign_id=${row.campaign_id}`} className="text-amber-400 hover:underline text-xs">Офферы кампании</Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {showGenerate && (
         <div className="mb-6 card-volumetric p-6 animate-scale-in">
@@ -396,6 +477,11 @@ export default function Doorways() {
           <option value="unprofitable">Убыточные</option>
           <option value="no_traffic">Без трафика</option>
         </Select>
+        <Select value={sortBy} onChange={(e) => { setSortBy((e.target.value || "") as "" | "health" | "revenue"); setPage(1); }} className="w-full sm:w-44">
+          <option value="">Сортировка</option>
+          <option value="health">По здоровью ↓</option>
+          <option value="revenue">По выручке ↓</option>
+        </Select>
       </div>
 
       {doorwaysMetrics?.external_signals_by_country && Object.keys(doorwaysMetrics.external_signals_by_country).length > 0 && (
@@ -540,7 +626,12 @@ export default function Doorways() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openPanel(d.id, "quality")}>Quality</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openPanel(d.id, "predict")}>Predict CR</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openPanel(d.id, "forecast")}>Прогноз прибыли</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openPanel(d.id, "sources")}>Трафик по источникам</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openPanel(d.id, "broken")}>Битые ссылки</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setCloneDoorwayId(d.id); setCloneDomainId(domains?.[0]?.id ?? 0); setClonePath("/"); }}>
+                              Клонировать на другой домен
+                            </DropdownMenuItem>
                             <DropdownMenuItem variant="danger" onClick={() => rollbackMut.mutate(d.id)}>Rollback</DropdownMenuItem>
                           </DropdownMenu>
                         </div>
@@ -569,13 +660,93 @@ export default function Doorways() {
         </div>
       )}
 
+      {cloneDoorwayId && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setCloneDoorwayId(null)}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-3">Клонировать дорвей #{cloneDoorwayId} на другой домен</h2>
+            <p className="text-slate-400 text-sm mb-4">Создастся новый дорвей (черновик) с тем же контентом и настройками.</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Домен</label>
+                <select
+                  value={cloneDomainId}
+                  onChange={(e) => setCloneDomainId(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
+                >
+                  {domains?.map((dom: { id: number; domain: string }) => (
+                    <option key={dom.id} value={dom.id}>{dom.domain}</option>
+                  ))}
+                  {(!domains?.length) && <option value={0}>—</option>}
+                </select>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Путь</label>
+                <Input value={clonePath} onChange={(e) => setClonePath(e.target.value || "/")} placeholder="/" className="bg-slate-700 border-slate-600" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setCloneDoorwayId(null)}>Отмена</Button>
+              <Button
+                onClick={() => cloneDoorwayId && cloneToDomainMut.mutate({ id: cloneDoorwayId, domain_id: cloneDomainId, path: clonePath || "/" })}
+                disabled={!cloneDomainId || cloneToDomainMut.isPending}
+              >
+                {cloneToDomainMut.isPending ? "Клонирование…" : "Клонировать"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {panelDoorwayId && panelType && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={closePanel}>
           <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-medium text-white mb-3 flex justify-between">
-              <span>{panelType === "quality" ? "Quality Check" : panelType === "predict" ? "Predict CR" : "Битые ссылки"} — дорвей #{panelDoorwayId}</span>
+              <span>{panelType === "quality" ? "Quality Check" : panelType === "predict" ? "Predict CR" : panelType === "forecast" ? "Прогноз прибыли" : panelType === "sources" ? "Трафик по источникам" : "Битые ссылки"} — дорвей #{panelDoorwayId}</span>
               <button onClick={closePanel} className="text-slate-400 hover:text-white">✕</button>
             </h2>
+            {panelType === "forecast" && (
+              profitForecast ? (
+                <div className="space-y-2 text-sm">
+                  <p className={profitForecast.status === "profitable" ? "text-emerald-400" : profitForecast.status === "no_traffic" ? "text-slate-400" : "text-amber-400"}>
+                    {profitForecast.message}
+                  </p>
+                  <p className="text-slate-400">Клики: {profitForecast.clicks}, конверсии: {profitForecast.conversions}, выручка: {profitForecast.revenue}</p>
+                  {profitForecast.benchmark_roi != null && <p className="text-slate-400">Бенчмарк RPC: {profitForecast.benchmark_roi}</p>}
+                  {profitForecast.days_to_profit != null && profitForecast.days_to_profit > 0 && (
+                    <p className="text-amber-300">Выход в плюс ориентировочно через {profitForecast.days_to_profit} дн.</p>
+                  )}
+                </div>
+              ) : <Skeleton className="h-24 w-full" />
+            )}
+            {panelType === "sources" && (
+              trafficBySource ? (
+                <div className="space-y-2 text-sm">
+                  <p className="text-slate-400">За {trafficBySource.days} дн. (utm_source в ссылках клика)</p>
+                  {trafficBySource.sources?.length ? (
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-slate-600 text-slate-400">
+                          <th className="py-1.5 font-medium">Источник</th>
+                          <th className="py-1.5 font-medium">Клики</th>
+                          <th className="py-1.5 font-medium">Конв.</th>
+                          <th className="py-1.5 font-medium">Выручка</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(trafficBySource.sources as { source: string; clicks: number; conversions: number; revenue: number }[]).map((row, i) => (
+                          <tr key={i} className="border-b border-slate-700/50 text-slate-300">
+                            <td className="py-1.5 font-mono">{row.source || "—"}</td>
+                            <td className="py-1.5">{row.clicks}</td>
+                            <td className="py-1.5">{row.conversions}</td>
+                            <td className="py-1.5">{row.revenue.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : <p className="text-slate-500">Нет данных по источникам (добавьте utm_source в ссылки на клик)</p>}
+                </div>
+              ) : <Skeleton className="h-24 w-full" />
+            )}
             {panelType === "quality" && (
               qualityCheck ? (
                 <div className="space-y-2 text-sm">

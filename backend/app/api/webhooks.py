@@ -13,7 +13,19 @@ from app.models.webhook import Webhook
 
 router = APIRouter()
 
-EVENT_CHOICES = ["doorway.deployed", "doorway.conversion", "doorway.rollback", "campaign.created"]
+EVENT_CHOICES = [
+    "doorway.deployed",
+    "doorway.conversion",
+    "doorway.rollback",
+    "doorway.anomaly",
+    "doorway.auto_paused",
+    "doorway.auto_fix",
+    "doorway.copy_winner",
+    "doorway.copy_cloaking",
+    "campaign.created",
+    "billing.near_limit",
+    "billing.over_limit",
+]
 
 
 class WebhookCreate(BaseModel):

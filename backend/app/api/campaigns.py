@@ -44,6 +44,11 @@ async def create_campaign(
     db.add(campaign)
     await db.commit()
     await db.refresh(campaign)
+    try:
+        from app.api.billing import notify_billing_limits_if_needed
+        await notify_billing_limits_if_needed(db, current_user.id)
+    except Exception:
+        pass
     return campaign
 
 
