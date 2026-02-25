@@ -174,15 +174,21 @@ def run_certbot_ssl(server: Server, domain: str, webroot: str = "/var/www/html")
         return False, str(e)
 
 
-def _append_sub_id(url: str, doorway_id: int, offer_id: Optional[int] = None) -> str:
+def _append_sub_id(url: str, doorway_id: int, offer_id: Optional[int] = None, source: Optional[str] = None) -> str:
     """Add sub_id to affiliate URL for postback attribution.
     If offer_id is set: sub_id=doorway_id_offer_id (for per-offer metrics).
+    If source is set: append _source (e.g. doorway_id_offer_id_google).
     Otherwise: sub_id=doorway_id (backward compatible).
     Supports placeholders {sub_id}, {doorway_id}.
     """
     if not url or doorway_id <= 0:
         return url
-    sid = f"{doorway_id}_{offer_id}" if offer_id is not None and offer_id > 0 else str(doorway_id)
+    if offer_id is not None and offer_id > 0:
+        sid = f"{doorway_id}_{offer_id}"
+    else:
+        sid = str(doorway_id)
+    if source and len(source) <= 32 and source.replace("_", "").replace("-", "").isalnum():
+        sid = f"{sid}_{source}"
     if "{sub_id}" in url:
         return url.replace("{sub_id}", sid)
     if "{doorway_id}" in url:

@@ -87,6 +87,122 @@ async def run_auto_rollback(
     return {"rolled_back": rolled}
 
 
+async def run_early_pause_no_conversions(
+    db: AsyncSession,
+    min_days: int = 2,
+    min_clicks: int = 30,
+) -> dict:
+    """
+    Пауза новых дорвеев (deployed за последние min_days дней): 0 конверсий при достаточном трафике.
+    Даёт прибыль уже на 2–3 день: не жжём бюджет на мёртвых дорвеях.
+    Опция в кампании: affiliate_rules.early_pause { enabled, min_days, min_clicks }. По умолчанию включено.
+    """
+    since = datetime.utcnow() - timedelta(days=min_days)
+    r = await db.execute(
+        select(Doorway, Campaign.user_id, Campaign.affiliate_rules)
+        .join(Campaign)
+        .where(
+            Doorway.status.in_(["deployed", "indexed"]),
+            Doorway.deployed_at.isnot(None),
+            Doorway.deployed_at >= since,
+        )
+    )
+    paused = 0
+    for dw, user_id, aff_rules in r.all():
+        rules = aff_rules or {}
+        ep = rules.get("early_pause") or {}
+        if ep.get("enabled") is False:
+            continue
+        md = int(ep.get("min_days") or min_days)
+        mc = int(ep.get("min_clicks") or min_clicks)
+        since_d = datetime.utcnow() - timedelta(days=md)
+        r2 = await db.execute(
+            select(
+                func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clk"),
+                func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conv"),
+                func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("rev"),
+            )
+            .where(
+                DoorwayMetrics.doorway_id == dw.id,
+                DoorwayMetrics.date >= since_d,
+            )
+        )
+        row = r2.first()
+        if not row or (row.conv or 0) > 0 or (row.rev or 0) > 0:
+            continue
+        if (row.clk or 0) < mc:
+            continue
+        dw.status = "paused"
+        dw.pause_reason = (
+            f"Ранний стоп: за последние {md} дн. {int(row.clk or 0)} кликов, 0 конверсий. "
+            "Смените оффер или проверьте постбек."
+        )
+        paused += 1
+        try:
+            from app.services.webhook_service import notify_webhooks
+            await notify_webhooks(db, user_id, "doorway.auto_paused", {
+                "doorway_id": dw.id, "clicks": int(row.clk or 0), "reason": "early_no_conversions",
+            })
+        except Exception:
+            pass
+    await db.commit()
+    return {"paused": paused}
+
+
+async def run_early_pause_24h(
+    db: AsyncSession,
+    min_clicks: int = 50,
+) -> dict:
+    """
+    Жёсткий ранний стоп за 24 ч: 0 конверсий и >= min_clicks за последние сутки → пауза.
+    Опция в кампании: affiliate_rules.early_pause_24h { enabled, min_clicks }. По умолчанию включено.
+    """
+    since = datetime.utcnow() - timedelta(hours=24)
+    r = await db.execute(
+        select(Doorway, Campaign.user_id, Campaign.affiliate_rules)
+        .join(Campaign)
+        .where(Doorway.status.in_(["deployed", "indexed"]))
+    )
+    paused = 0
+    for dw, user_id, aff_rules in r.all():
+        rules = aff_rules or {}
+        ep = rules.get("early_pause_24h") or {}
+        if ep.get("enabled") is False:
+            continue
+        mc = int(ep.get("min_clicks") or min_clicks)
+        r2 = await db.execute(
+            select(
+                func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clk"),
+                func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conv"),
+                func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("rev"),
+            )
+            .where(
+                DoorwayMetrics.doorway_id == dw.id,
+                DoorwayMetrics.date >= since,
+            )
+        )
+        row = r2.first()
+        if not row or (row.conv or 0) > 0 or (row.rev or 0) > 0:
+            continue
+        if (row.clk or 0) < mc:
+            continue
+        dw.status = "paused"
+        dw.pause_reason = (
+            f"Ранний стоп 24ч: за сутки {int(row.clk or 0)} кликов, 0 конверсий. "
+            "Смените оффер или проверьте постбек."
+        )
+        paused += 1
+        try:
+            from app.services.webhook_service import notify_webhooks
+            await notify_webhooks(db, user_id, "doorway.auto_paused", {
+                "doorway_id": dw.id, "clicks": int(row.clk or 0), "reason": "early_pause_24h",
+            })
+        except Exception:
+            pass
+    await db.commit()
+    return {"paused": paused}
+
+
 async def run_auto_pause_unprofitable(
     db: AsyncSession,
     min_revenue: float = 0,
@@ -363,6 +479,8 @@ async def run_anomaly_alerts(db: AsyncSession, days: int = 14) -> dict:
 async def run_all(db: AsyncSession) -> dict:
     """Run all daily cron tasks."""
     r0 = await run_anomaly_alerts(db, days=14)
+    r_early = await run_early_pause_no_conversions(db, min_days=2, min_clicks=30)
+    r_early24 = await run_early_pause_24h(db, min_clicks=50)
     r1 = await run_auto_rollback(db, threshold_percent=15, min_days=7)
     r2 = await run_auto_pause_unprofitable(db, min_revenue=0, min_days=14)
     r3 = await run_auto_switch_offers(db, threshold_percent=15, min_days=7)
@@ -371,6 +489,8 @@ async def run_all(db: AsyncSession) -> dict:
     return {
         "status": "ok",
         "anomaly_alerts": r0,
+        "early_pause_no_conversions": r_early,
+        "early_pause_24h": r_early24,
         "auto_rollback": r1,
         "auto_pause_unprofitable": r2,
         "auto_switch_offers": r3,

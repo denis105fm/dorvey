@@ -37,6 +37,10 @@ class RulesBuilder(BaseModel):
     auto_apply_min_clicks: Optional[int] = None
     auto_apply_min_impressions: Optional[int] = None
     preferred_layout_index: Optional[int] = None  # A/B winner layout for new doorways
+    # Early pause: stop new doorways with traffic but 0 conversions in N days
+    early_pause_enabled: Optional[bool] = None
+    early_pause_min_days: Optional[int] = None
+    early_pause_min_clicks: Optional[int] = None
 
 
 async def _check(db, campaign_id: int, user_id: int):
@@ -93,6 +97,9 @@ async def get_rules(campaign_id: int, current_user: CurrentUser, db: AsyncSessio
         "auto_apply_min_clicks": ai_conf.get("auto_apply_min_clicks"),
         "auto_apply_min_impressions": ai_conf.get("auto_apply_min_impressions"),
         "preferred_layout_index": ai_conf.get("preferred_layout_index"),
+        "early_pause_enabled": (rules.get("early_pause") or {}).get("enabled", True),
+        "early_pause_min_days": (rules.get("early_pause") or {}).get("min_days", 2),
+        "early_pause_min_clicks": (rules.get("early_pause") or {}).get("min_clicks", 30),
     }
 
 
@@ -142,6 +149,14 @@ async def update_rules(campaign_id: int, data: RulesBuilder, current_user: Curre
         rules["ai"]["auto_apply_min_impressions"] = data.auto_apply_min_impressions
     if "preferred_layout_index" in data.model_dump(exclude_unset=True):
         rules["ai"]["preferred_layout_index"] = data.preferred_layout_index
+    if data.early_pause_enabled is not None or data.early_pause_min_days is not None or data.early_pause_min_clicks is not None:
+        rules["early_pause"] = {**(rules.get("early_pause") or {})}
+        if data.early_pause_enabled is not None:
+            rules["early_pause"]["enabled"] = data.early_pause_enabled
+        if data.early_pause_min_days is not None:
+            rules["early_pause"]["min_days"] = data.early_pause_min_days
+        if data.early_pause_min_clicks is not None:
+            rules["early_pause"]["min_clicks"] = data.early_pause_min_clicks
     c.affiliate_rules = rules
     await db.commit()
     return {"status": "ok"}

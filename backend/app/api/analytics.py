@@ -30,6 +30,8 @@ from app.schemas.analytics import (
     CampaignPerformance,
     DoorwayProfitMetric,
     AnalyticsDoorwaysMetricsResponse,
+    EarlyDoorwayItem,
+    EarlyDoorwaysResponse,
 )
 
 router = APIRouter()
@@ -130,17 +132,24 @@ async def postback(
     Bot filter: rejects if > 20 postbacks/min per doorway.
     """
     offer_id = None
+    traffic_source = None
     try:
         raw = (sub_id or "").strip()
         if "_" in raw:
-            parts = raw.split("_", 1)
+            parts = raw.split("_")
             doorway_id = int(parts[0] or "0")
-            if len(parts) > 1 and parts[1].isdigit():
+            if len(parts) >= 2 and parts[1].isdigit():
                 offer_id = int(parts[1])
+                traffic_source = parts[2] if len(parts) > 2 else None
+            else:
+                traffic_source = parts[1] if len(parts) >= 2 else None
         else:
             doorway_id = int(raw or "0")
-    except ValueError:
+    except (ValueError, IndexError):
         return {"status": "ignored", "reason": "invalid sub_id"}
+    if traffic_source is not None:
+        import re
+        traffic_source = re.sub(r"[^a-z0-9_-]", "", (traffic_source or "").lower())[:32] or None
     if doorway_id > 0 and not _check_postback_rate(doorway_id):
         return {"status": "ignored", "reason": "rate_limit_suspected_bot"}
     if doorway_id <= 0:
@@ -189,6 +198,29 @@ async def postback(
             else:
                 om = OfferMetrics(offer_id=offer_id, date=today, conversions=1, revenue=payout or 0)
                 db.add(om)
+    if traffic_source and len(traffic_source) <= 32:
+        from app.models.doorway_source_metrics import DoorwaySourceMetrics
+        r_src = await db.execute(
+            select(DoorwaySourceMetrics).where(
+                DoorwaySourceMetrics.doorway_id == doorway_id,
+                DoorwaySourceMetrics.date >= today,
+                DoorwaySourceMetrics.date < tomorrow,
+                DoorwaySourceMetrics.source == traffic_source,
+            )
+        )
+        sm = r_src.scalar_one_or_none()
+        if sm:
+            sm.conversions += 1
+            sm.revenue += payout or 0
+        else:
+            sm = DoorwaySourceMetrics(
+                doorway_id=doorway_id,
+                date=today,
+                source=traffic_source,
+                conversions=1,
+                revenue=payout or 0,
+            )
+            db.add(sm)
     await db.commit()
     uid = None
     try:
@@ -275,12 +307,19 @@ async def click_redirect(
     geo: str | None = Query(None, description="Country code for GEO offer routing"),
     device: str | None = Query(None, description="mobile|desktop for device offer routing"),
     oid: int | None = Query(None, alias="oid", description="offer_id when link was built with offer (for ROI metrics)"),
+    utm_source: str | None = Query(None, alias="utm_source", description="Traffic source for ROI by source (e.g. google, fb)"),
+    src: str | None = Query(None, alias="src", description="Alias for utm_source"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Click tracking: redirect to affiliate URL with sub_id (doorway_id or doorway_id_offer_id).
-    Increment DoorwayMetrics.clicks and OfferMetrics.clicks when oid present.
+    Click tracking: redirect to affiliate URL with sub_id (doorway_id or doorway_id_offer_id or + _source).
+    Increment DoorwayMetrics.clicks, OfferMetrics.clicks when oid present, DoorwaySourceMetrics when utm_source present.
     """
+    import re
+    raw_source = (utm_source or src or "").strip().lower()
+    traffic_source = None
+    if raw_source:
+        traffic_source = re.sub(r"[^a-z0-9_-]", "", raw_source)[:32] or None
     doorway_id = dw
     r = await db.execute(
         select(Doorway, Campaign)
@@ -308,7 +347,7 @@ async def click_redirect(
             aff_url = best_url
             if chosen_offer_id is None:
                 chosen_offer_id = best_oid
-    target = _append_sub_id(aff_url, doorway_id, chosen_offer_id)
+    target = _append_sub_id(aff_url, doorway_id, chosen_offer_id, traffic_source)
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     r2 = await db.execute(
         select(DoorwayMetrics).where(
@@ -339,6 +378,23 @@ async def click_redirect(
         else:
             om = OfferMetrics(offer_id=chosen_offer_id, date=today, clicks=1)
             db.add(om)
+    if traffic_source:
+        from app.models.doorway_source_metrics import DoorwaySourceMetrics
+        tomorrow = today + timedelta(days=1)
+        r_src = await db.execute(
+            select(DoorwaySourceMetrics).where(
+                DoorwaySourceMetrics.doorway_id == doorway_id,
+                DoorwaySourceMetrics.date >= today,
+                DoorwaySourceMetrics.date < tomorrow,
+                DoorwaySourceMetrics.source == traffic_source,
+            )
+        )
+        sm = r_src.scalar_one_or_none()
+        if sm:
+            sm.clicks = (sm.clicks or 0) + 1
+        else:
+            sm = DoorwaySourceMetrics(doorway_id=doorway_id, date=today, source=traffic_source, clicks=1)
+            db.add(sm)
     if vid and len(vid) <= 64 and vid.replace("-", "").replace("_", "").isalnum():
         from app.models.visitor import VisitorEvent
         ev = VisitorEvent(
@@ -433,6 +489,7 @@ class SendPushRequest(BaseModel):
     title: str
     body: str
     url: str | None = None
+    use_best_offer_url: bool = False
 
 
 @router.post("/send-push")
@@ -458,6 +515,39 @@ async def send_push(
     subs = r.scalars().all()
     if not subs:
         return {"status": "ok", "sent": 0, "message": "Нет подписок"}
+    # Ретаргетинг: ссылка на лучший оффер по ROI
+    push_url = data.url
+    if (not push_url or not push_url.strip()) and data.use_best_offer_url and (data.campaign_id or data.doorway_id):
+        from app.services.deploy import get_best_offer_url_by_roi, _append_sub_id
+        camp_id = data.campaign_id
+        if data.doorway_id:
+            r_c = await db.execute(select(Doorway.campaign_id).where(Doorway.id == data.doorway_id))
+            camp_id = r_c.scalar_one_or_none()
+        if camp_id:
+            off_r = await db.execute(
+                select(Offer).where(Offer.campaign_id == camp_id, Offer.is_active == True).order_by(Offer.priority.desc())
+            )
+            offers_raw = off_r.scalars().all()
+            offers_list = [{"id": o.id, "url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in offers_raw]
+            if offers_list:
+                best_url, best_oid = await get_best_offer_url_by_roi(db, offers_list, None, None)
+                dw_id = subs[0].doorway_id if subs else None
+                if best_url and dw_id:
+                    set_base = await db.execute(
+                        select(Setting).where(
+                            Setting.user_id == current_user.id,
+                            Setting.key.in_(["api_base_url", "click_tracking_enabled"]),
+                        )
+                    )
+                    settings_map = {s.key: s.value for s in set_base.scalars().all()}
+                    click_base = (settings_map.get("api_base_url") or "").strip().rstrip("/")
+                    click_enabled = str(settings_map.get("click_tracking_enabled") or "").lower() == "true"
+                    if click_enabled and click_base:
+                        push_url = f"{click_base}/api/analytics/click?dw={dw_id}&oid={best_oid or ''}"
+                    else:
+                        push_url = _append_sub_id(best_url, dw_id, best_oid)
+    if not push_url or not push_url.strip():
+        push_url = "/"
     set_r = await db.execute(
         select(Setting).where(
             Setting.user_id == current_user.id,
@@ -471,7 +561,7 @@ async def send_push(
         from pywebpush import webpush
     except ImportError:
         raise HTTPException(503, "pywebpush не установлен")
-    payload = {"title": data.title, "body": data.body, "url": data.url or "/"}
+    payload = {"title": data.title, "body": data.body, "url": push_url or "/"}
     payload_json = json.dumps(payload, ensure_ascii=False)
     vapid_priv = priv_row.value
     claims = {"sub": "mailto:admin@dorvey.local"}
@@ -986,6 +1076,222 @@ async def get_analytics_doorways_metrics(
     return AnalyticsDoorwaysMetricsResponse(doorways=result, min_clicks_used=min_clicks, external_signals_by_country=external_by_country)
 
 
+@router.get("/early-doorways", response_model=EarlyDoorwaysResponse)
+async def get_early_doorways(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(3, ge=1, le=14, description="Дорвеи задеплоены за последние N дней"),
+    min_clicks: int = Query(20, ge=5, le=200, description="Минимум кликов для попадания в список"),
+):
+    """
+    Дорвеи, задеплоенные за последние N дней, у которых есть трафик (>= min_clicks), но 0 конверсий.
+    Для быстрого реагирования на 2–3 день: сменить оффер или поставить на паузу.
+    """
+    since = datetime.utcnow() - timedelta(days=days)
+    r = await db.execute(
+        select(Doorway.id, Doorway.campaign_id, Doorway.title, Doorway.deployed_at)
+        .join(Campaign)
+        .where(
+            Campaign.user_id == current_user.id,
+            Doorway.status.in_(["deployed", "indexed"]),
+            Doorway.deployed_at.isnot(None),
+            Doorway.deployed_at >= since,
+        )
+    )
+    doorways = r.all()
+    if not doorways:
+        return EarlyDoorwaysResponse(doorways=[], days=days, min_clicks=min_clicks)
+    dw_ids = [row[0] for row in doorways]
+    r2 = await db.execute(
+        select(
+            DoorwayMetrics.doorway_id,
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clk"),
+            func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conv"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("rev"),
+        )
+        .where(
+            DoorwayMetrics.doorway_id.in_(dw_ids),
+            DoorwayMetrics.date >= since,
+        )
+        .group_by(DoorwayMetrics.doorway_id)
+    )
+    metrics = {row.doorway_id: (int(row.clk or 0), int(row.conv or 0), float(row.rev or 0)) for row in r2.all()}
+    result_list = []
+    for dw_id, camp_id, title, deployed_at in doorways:
+        clk, conv, rev = metrics.get(dw_id, (0, 0, 0.0))
+        if clk < min_clicks or conv > 0 or rev > 0:
+            continue
+        result_list.append(
+            EarlyDoorwayItem(
+                doorway_id=dw_id,
+                campaign_id=camp_id,
+                title=title,
+                clicks=clk,
+                conversions=conv,
+                revenue=rev,
+                deployed_at=deployed_at,
+            )
+        )
+    return EarlyDoorwaysResponse(doorways=result_list, days=days, min_clicks=min_clicks)
+
+
+@router.get("/doorway/{doorway_id}/profit-forecast")
+async def get_doorway_profit_forecast(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(7, ge=1, le=30),
+):
+    """
+    Прогноз «выйдет в плюс»: при текущем трафике и бенчмарке кампании — через сколько дней дорвей выйдет на прибыль.
+    """
+    r = await db.execute(
+        select(Doorway, Campaign.id)
+        .join(Campaign)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    row = r.first()
+    if not row:
+        raise HTTPException(404, "Doorway not found")
+    dw, camp_id = row
+    since = datetime.utcnow() - timedelta(days=days)
+    m = await db.execute(
+        select(
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("clk"),
+            func.coalesce(func.sum(DoorwayMetrics.conversions), 0).label("conv"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("rev"),
+        )
+        .where(DoorwayMetrics.doorway_id == doorway_id, DoorwayMetrics.date >= since)
+    )
+    mm = m.first()
+    clk = int(mm.clk or 0)
+    conv = int(mm.conv or 0)
+    rev = float(mm.rev or 0)
+    min_clicks = await _get_min_clicks_for_profit(db, current_user.id)
+    # Бенчмарк по кампании
+    subq = select(Doorway.id).where(Doorway.campaign_id == camp_id)
+    br = await db.execute(
+        select(
+            func.coalesce(func.sum(DoorwayMetrics.clicks), 0).label("c"),
+            func.coalesce(func.sum(DoorwayMetrics.revenue), 0).label("r"),
+        )
+        .where(DoorwayMetrics.doorway_id.in_(subq), DoorwayMetrics.date >= since)
+    )
+    brr = br.first()
+    total_clk = int(brr.c or 0)
+    total_rev = float(brr.r or 0)
+    benchmark_roi = (total_rev / total_clk) if total_clk else None
+    if rev > 0:
+        return {
+            "doorway_id": doorway_id,
+            "status": "profitable",
+            "days_to_profit": 0,
+            "message": "Дорвей уже приносит прибыль.",
+            "clicks": clk,
+            "conversions": conv,
+            "revenue": rev,
+            "benchmark_roi": benchmark_roi,
+        }
+    if clk < min_clicks:
+        return {
+            "doorway_id": doorway_id,
+            "status": "no_traffic",
+            "days_to_profit": None,
+            "message": f"Мало данных: нужно минимум {min_clicks} кликов за период.",
+            "clicks": clk,
+            "conversions": conv,
+            "revenue": rev,
+            "benchmark_roi": benchmark_roi,
+        }
+    if not benchmark_roi or benchmark_roi <= 0:
+        return {
+            "doorway_id": doorway_id,
+            "status": "unprofitable",
+            "days_to_profit": None,
+            "message": "По кампании нет бенчмарка ROI для прогноза.",
+            "clicks": clk,
+            "conversions": conv,
+            "revenue": rev,
+            "benchmark_roi": benchmark_roi,
+        }
+    # Не в плюсе: оценка дней до выхода на benchmark_roi
+    clicks_per_day = clk / days if days else 0
+    if clicks_per_day <= 0:
+        return {
+            "doorway_id": doorway_id,
+            "status": "unprofitable",
+            "days_to_profit": None,
+            "message": "Нет трафика за период — прогноз невозможен.",
+            "clicks": clk,
+            "conversions": conv,
+            "revenue": rev,
+            "benchmark_roi": benchmark_roi,
+        }
+    rev_needed = benchmark_roi * clk - rev
+    rev_per_day = clicks_per_day * benchmark_roi
+    if rev_per_day <= 0:
+        days_to_profit = None
+    else:
+        days_to_profit = max(1, int(rev_needed / rev_per_day) + 1)
+    return {
+        "doorway_id": doorway_id,
+        "status": "unprofitable",
+        "days_to_profit": days_to_profit,
+        "message": f"При текущем трафике (~{clicks_per_day:.0f} кл/день) выход в плюс ориентировочно через {days_to_profit} дн." if days_to_profit else "Недостаточно данных для прогноза.",
+        "clicks": clk,
+        "conversions": conv,
+        "revenue": rev,
+        "benchmark_roi": benchmark_roi,
+        "clicks_per_day": round(clicks_per_day, 1),
+    }
+
+
+@router.get("/doorway/{doorway_id}/traffic-by-source")
+async def get_doorway_traffic_by_source(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, ge=1, le=365),
+):
+    """
+    Метрики по источникам трафика (utm_source) для дорвея: клики, конверсии, выручка по каждому source.
+    """
+    from app.models.doorway_source_metrics import DoorwaySourceMetrics
+
+    r = await db.execute(
+        select(Doorway.id, Doorway.campaign_id)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    row = r.first()
+    if not row:
+        raise HTTPException(404, "Doorway not found")
+    since = datetime.utcnow() - timedelta(days=days)
+    since = since.replace(hour=0, minute=0, second=0, microsecond=0)
+    agg = await db.execute(
+        select(
+            DoorwaySourceMetrics.source,
+            func.coalesce(func.sum(DoorwaySourceMetrics.clicks), 0).label("clicks"),
+            func.coalesce(func.sum(DoorwaySourceMetrics.conversions), 0).label("conversions"),
+            func.coalesce(func.sum(DoorwaySourceMetrics.revenue), 0).label("revenue"),
+        )
+        .where(
+            DoorwaySourceMetrics.doorway_id == doorway_id,
+            DoorwaySourceMetrics.date >= since,
+        )
+        .group_by(DoorwaySourceMetrics.source)
+    )
+    rows = agg.all()
+    return {
+        "doorway_id": doorway_id,
+        "days": days,
+        "sources": [
+            {"source": r.source, "clicks": int(r.clicks), "conversions": int(r.conversions), "revenue": float(r.revenue)}
+            for r in rows
+        ],
+    }
+
+
 async def _load_external_settings(db: AsyncSession, user_id: int):
     """Returns (enabled, news_key, gnews_key, mediastack_key, guardian_key, season_url)."""
     r = await db.execute(
@@ -1114,3 +1420,66 @@ async def get_offer_country_recommendations(
         recommendations.sort(key=lambda x: (-x["our_clicks"], -x["offer_count"]))
 
     return {"recommendations": recommendations, "period_days": days}
+
+
+@router.get("/cross-campaign-offer-suggestions")
+async def get_cross_campaign_offer_suggestions(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    campaign_id: int = Query(..., description="Кампания, для которой подбираем офферы"),
+    geo: str | None = Query(None, description="Фильтр по гео (RU, US, …)"),
+    days: int = Query(30, ge=7, le=365),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """
+    Офферы из других кампаний пользователя с хорошим ROI — подсказка «что конвертит в других кампаниях».
+    """
+    from app.models.offer_metrics import OfferMetrics
+
+    ok = await db.execute(
+        select(Campaign.id).where(Campaign.id == campaign_id, Campaign.user_id == current_user.id)
+    )
+    if not ok.scalar_one_or_none():
+        raise HTTPException(404, "Campaign not found")
+    since = datetime.utcnow() - timedelta(days=days)
+    # Офферы из других кампаний того же пользователя (не текущая)
+    off_subq = (
+        select(Offer.id, Offer.campaign_id, Offer.url, Offer.geo, Offer.name)
+        .join(Campaign)
+        .where(Campaign.user_id == current_user.id, Campaign.id != campaign_id, Offer.is_active == True)
+    )
+    if geo:
+        off_subq = off_subq.where(Offer.geo.isnot(None), func.upper(Offer.geo) == geo.upper())
+    r = await db.execute(off_subq)
+    other_offers = r.all()
+    if not other_offers:
+        return {"suggestions": [], "period_days": days}
+    offer_ids = [o[0] for o in other_offers]
+    met = await db.execute(
+        select(
+            OfferMetrics.offer_id,
+            func.coalesce(func.sum(OfferMetrics.clicks), 0).label("clk"),
+            func.coalesce(func.sum(OfferMetrics.revenue), 0).label("rev"),
+        )
+        .where(OfferMetrics.offer_id.in_(offer_ids), OfferMetrics.date >= since)
+        .group_by(OfferMetrics.offer_id)
+    )
+    metrics = {row.offer_id: (int(row.clk or 0), float(row.rev or 0)) for row in met.all()}
+    suggestions = []
+    for oid, camp_id, url, ogeo, name in other_offers:
+        clk, rev = metrics.get(oid, (0, 0))
+        if clk < 5:
+            continue
+        roi = rev / clk if clk else 0
+        suggestions.append({
+            "offer_id": oid,
+            "campaign_id": camp_id,
+            "url": url,
+            "geo": ogeo,
+            "name": name,
+            "clicks": clk,
+            "revenue": round(rev, 2),
+            "roi_per_click": round(roi, 4),
+        })
+    suggestions.sort(key=lambda x: -x["roi_per_click"])
+    return {"suggestions": suggestions[:limit], "period_days": days}

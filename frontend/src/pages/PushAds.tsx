@@ -13,6 +13,7 @@ export default function PushAds() {
     title: "",
     body: "",
     url: "",
+    use_best_offer_url: false,
   });
 
   const { data: campaigns } = useQuery({
@@ -26,7 +27,7 @@ export default function PushAds() {
   });
 
   const sendPushMut = useMutation({
-    mutationFn: (d: { campaign_id?: number; doorway_id?: number; title: string; body: string; url?: string }) =>
+    mutationFn: (d: { campaign_id?: number; doorway_id?: number; title: string; body: string; url?: string; use_best_offer_url?: boolean }) =>
       api.post("/analytics/send-push", { ...d, campaign_id: d.campaign_id || undefined, doorway_id: d.doorway_id || undefined }).then((r) => r.data),
     onSuccess: (data) => {
       toast.success(`Отправлено: ${data.sent} из ${data.total}`);
@@ -50,6 +51,7 @@ export default function PushAds() {
       title: form.title,
       body: form.body,
       url: form.url || undefined,
+      use_best_offer_url: form.use_best_offer_url,
     });
   };
 
@@ -124,6 +126,15 @@ export default function PushAds() {
                 placeholder="/ или https://..."
                 className="bg-slate-700 border-slate-600"
               />
+              <label className="flex items-center gap-2 mt-2 text-slate-400 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.use_best_offer_url}
+                  onChange={(e) => setForm((f) => ({ ...f, use_best_offer_url: e.target.checked }))}
+                  className="rounded border-slate-600 text-emerald-600 bg-slate-700"
+                />
+                Подставить лучший оффер по ROI (если ссылка пустая)
+              </label>
             </div>
             <Button
               onClick={handleSend}

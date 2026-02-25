@@ -471,6 +471,26 @@ export default function Campaigns() {
                       </div>
                     )}
                   </div>
+                  <div className="border-t border-slate-600 pt-3 mt-3">
+                    <h3 className="text-slate-300 font-medium mb-2">Ранний стоп (прибыль на 2–3 день)</h3>
+                    <p className="text-slate-400 text-xs mb-2">Автопауза дорвеев, задеплоенных недавно: есть трафик, но 0 конверсий. Крон run-all вызывает это правило.</p>
+                    <label className="flex items-center gap-2 text-slate-300 mb-3">
+                      <input type="checkbox" checked={rules.early_pause_enabled !== false} onChange={(e) => updateRulesMut.mutate({ early_pause_enabled: e.target.checked })} />
+                      Включить ранний стоп
+                    </label>
+                    {(rules.early_pause_enabled !== false) && (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Период (дней) — дорвеи задеплоены за</label>
+                          <input type="number" min={1} max={7} value={rules.early_pause_min_days ?? 2} onChange={(e) => updateRulesMut.mutate({ early_pause_min_days: parseInt(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 text-xs mb-1">Мин. кликов — паузить если 0 конверсий при ≥</label>
+                          <input type="number" min={10} max={200} value={rules.early_pause_min_clicks ?? 30} onChange={(e) => updateRulesMut.mutate({ early_pause_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

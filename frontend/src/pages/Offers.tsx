@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 
@@ -28,7 +29,16 @@ type Offer = { id: number; url: string; name?: string | null; rate?: string | nu
 
 export default function Offers() {
   const qc = useQueryClient();
-  const [campaignId, setCampaignId] = useState(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const campaignIdFromUrl = searchParams.get("campaign_id");
+  const [campaignId, setCampaignId] = useState(() => {
+    const n = campaignIdFromUrl ? parseInt(campaignIdFromUrl, 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  });
+  useEffect(() => {
+    const n = campaignIdFromUrl ? parseInt(campaignIdFromUrl, 10) : NaN;
+    if (Number.isFinite(n) && n > 0 && n !== campaignId) setCampaignId(n);
+  }, [campaignIdFromUrl]);
   const [modal, setModal] = useState<"create" | "edit" | "import" | null>(null);
   const [edit, setEdit] = useState<Offer | null>(null);
   const [form, setForm] = useState({ url: "", name: "", rate: "", amount: "", term: "", geo: "", device: "", priority: 0, is_active: true, description: "", restrictions: "", recommendations: "" });
@@ -47,6 +57,11 @@ export default function Offers() {
   const { data: campaigns } = useQuery({
     queryKey: ["campaigns"],
     queryFn: () => api.get("/campaigns/").then((r) => r.data),
+  });
+  const { data: crossCampaignSuggestions } = useQuery({
+    queryKey: ["cross-campaign-offers", campaignId],
+    queryFn: () => api.get("/analytics/cross-campaign-offer-suggestions", { params: { campaign_id: campaignId, days: 30, limit: 5 } }).then((r) => r.data),
+    enabled: !!campaignId && campaignId > 0,
   });
 
   const createMut = useMutation({
@@ -128,6 +143,23 @@ export default function Offers() {
         <button onClick={() => { setModal("create"); setForm({ url: "", name: "", rate: "", amount: "", term: "", geo: "", device: "", priority: 0, is_active: true, description: "", restrictions: "", recommendations: "" }); }} className="mt-6 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium">Добавить оффер</button>
         <button onClick={() => { setModal("import"); setImportUrl(""); setImportFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }} className="mt-6 px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-medium">Импорт из Zeydoo CSV</button>
       </div>
+      {crossCampaignSuggestions?.suggestions?.length > 0 && (
+        <div className="mb-4 p-4 rounded-xl bg-violet-500/10 border border-violet-500/30">
+          <h3 className="text-sm font-medium text-violet-200 mb-2">Офферы из других кампаний с хорошим ROI (за 30 дн.)</h3>
+          <p className="text-slate-400 text-xs mb-2">Можно добавить похожий оффер в эту кампанию.</p>
+          <ul className="space-y-1 text-sm">
+            {(crossCampaignSuggestions.suggestions as { offer_id: number; campaign_id: number; url: string; geo?: string; name?: string; clicks: number; revenue: number; roi_per_click: number }[]).map((s) => (
+              <li key={s.offer_id} className="flex flex-wrap items-center gap-2 text-slate-300">
+                <span className="text-violet-300">#{s.offer_id}</span>
+                {s.name && <span>{s.name}</span>}
+                {s.geo && <span className="text-slate-500">({s.geo})</span>}
+                <span>RPC: {s.roi_per_click}</span>
+                <span className="text-slate-500">клики: {s.clicks}, выручка: {s.revenue}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {isLoading ? (
         <p className="text-slate-400">Загрузка...</p>
       ) : (

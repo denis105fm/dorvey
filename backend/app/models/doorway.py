@@ -31,6 +31,7 @@ class Doorway(Base):
     domain = relationship("Domain", back_populates="doorways")
     versions = relationship("DoorwayVersion", back_populates="doorway", order_by="DoorwayVersion.created_at.desc()")
     metrics = relationship("DoorwayMetrics", back_populates="doorway")
+    source_metrics = relationship("DoorwaySourceMetrics", back_populates="doorway")
 
 
 class DoorwayVersion(Base):

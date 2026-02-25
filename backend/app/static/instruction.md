@@ -380,6 +380,7 @@ DNS домена должен указывать на выбранный сер�
 | Эндпоинт | Назначение |
 |----------|------------|
 | `POST /api/cron/auto-rollback?threshold_percent=15&min_days=7` | Авто-откат контента дорвея при падении CR |
+| `POST /api/cron/early-pause-no-conversions?min_days=2&min_clicks=30` | Ранний стоп: пауза дорвеев, задеплоенных за последние N дней, с трафиком, но 0 конверсий (прибыль на 2–3 день) |
 | `POST /api/cron/auto-pause-unprofitable?min_days=14` | Пауза убыточных дорвеев |
 | `POST /api/cron/auto-switch-offers?threshold_percent=15&min_days=7` | Автосмена офферов при падении CR (кампании с 2+ офферами) |
 | `POST /api/cron/pause-on-affiliate-issues?min_days=7` | Пауза при проблемах партнёрки (падение конверсий) |
