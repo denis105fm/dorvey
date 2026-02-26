@@ -29,7 +29,7 @@ type Offer = { id: number; url: string; name?: string | null; rate?: string | nu
 
 export default function Offers() {
   const qc = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const campaignIdFromUrl = searchParams.get("campaign_id");
   const [campaignId, setCampaignId] = useState(() => {
     const n = campaignIdFromUrl ? parseInt(campaignIdFromUrl, 10) : NaN;
