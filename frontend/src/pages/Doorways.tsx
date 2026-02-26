@@ -41,7 +41,7 @@ export default function Doorways() {
   const [result, setResult] = useState<{ html?: string; doorway_id?: number; validation_violations?: string[] } | null>(null);
   const [recsDoorwayId, setRecsDoorwayId] = useState<number | null>(null);
   const [panelDoorwayId, setPanelDoorwayId] = useState<number | null>(null);
-  const [panelType, setPanelType] = useState<"quality" | "predict" | "broken" | "forecast" | null>(null);
+  const [panelType, setPanelType] = useState<"quality" | "predict" | "broken" | "forecast" | "sources" | null>(null);
   const [variantsDoorwayId, setVariantsDoorwayId] = useState<number | null>(null);
   const [filterCampaign, setFilterCampaign] = useState<string>("");
   const [filterDomain, setFilterDomain] = useState<string>("");
