@@ -361,7 +361,7 @@ var esc2=false;window.addEventListener('scroll',function(){{if(esc2)return;var h
             if cq_id:
                 scripts.append(f'<script src="https://t.contentsquare.net/uxa/{cq_id}.js"></script>')
     if clarity_project_id:
-        cid = "".join(c for c in str(clarity_project_id).strip() if c.isalnum() or c in "-_")
+        cid = "".join(c for c in str(clarity_project_id).strip() if c.isalnum() or c in "-_@")
         if cid:
             scripts.append(f'<script type="text/javascript">(function(c,l,a,r,i,t,y){{c[a]=c[a]||function(){{(c[a].q=c[a].q||[]).push(arguments)}};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);}})(window,document,"clarity","script","{cid}");</script>')
     if exit_intent_enabled:
