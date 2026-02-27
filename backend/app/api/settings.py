@@ -297,7 +297,7 @@ async def gsc_oauth_start(
             400,
             "Сначала сохраните Client ID и Client Secret в настройках и нажмите «Сохранить интеграции».",
         )
-    base = str(request.base_url).rstrip("/")
+    base = (settings.PUBLIC_APP_URL or "").strip().rstrip("/") or str(request.base_url).rstrip("/")
     redirect_uri = f"{base}/api/settings/gsc-oauth-callback"
     state_payload = {
         "sub": str(current_user.id),
@@ -334,7 +334,7 @@ async def gsc_oauth_callback(
     Callback после авторизации в Google: обмен code на refresh_token и сохранение.
     Редирект на /settings?gsc_token=ok или ?gsc_token=error.
     """
-    base = str(request.base_url).rstrip("/")
+    base = (settings.PUBLIC_APP_URL or "").strip().rstrip("/") or str(request.base_url).rstrip("/")
     frontend_settings = f"{base}/settings"
     if error:
         return RedirectResponse(url=f"{frontend_settings}?gsc_token=error&message={error}")
