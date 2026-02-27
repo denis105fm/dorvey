@@ -170,6 +170,41 @@ class TestExternalApiRequest(BaseModel):
     country: str = "us"
 
 
+class TestOpenAIRequest(BaseModel):
+    api_key: str
+
+
+@router.post("/test-openai")
+async def test_openai_key(data: TestOpenAIRequest, current_user: CurrentUser):
+    """Проверка OpenAI API ключа: один короткий запрос. Возвращает ok и сообщение."""
+    key = (data.api_key or "").strip()
+    if not key:
+        raise HTTPException(400, "Укажите API ключ")
+    from app.services.openai_service import openai_service
+    result = {"ok": False, "message": ""}
+    try:
+        client = openai_service.get_client_for_key(key)
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Say OK"}],
+            max_tokens=5,
+        )
+        if resp.choices and resp.choices[0].message.content:
+            result["ok"] = True
+            result["message"] = "Ключ активен, AI доступен"
+        else:
+            result["message"] = "Пустой ответ от API"
+    except Exception as e:
+        err = str(e).lower()
+        if "invalid" in err or "authentication" in err or "api_key" in err or "401" in err:
+            result["message"] = "Неверный или недействительный ключ"
+        elif "rate" in err or "429" in err:
+            result["message"] = "Лимит запросов (ключ рабочий)"
+        else:
+            result["message"] = str(e)[:150]
+    return result
+
+
 @router.post("/test-external-api")
 async def test_external_api(
     data: TestExternalApiRequest,
