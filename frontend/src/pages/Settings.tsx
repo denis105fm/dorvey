@@ -79,6 +79,10 @@ export default function Settings() {
   const [fetchserpTestMessage, setFetchserpTestMessage] = useState("");
   const [bingTestStatus, setBingTestStatus] = useState<null | "checking" | "ok" | "error">(null);
   const [bingTestMessage, setBingTestMessage] = useState("");
+  const [clarityTestStatus, setClarityTestStatus] = useState<null | "checking" | "ok" | "error">(null);
+  const [clarityTestMessage, setClarityTestMessage] = useState("");
+  const [hotjarTestStatus, setHotjarTestStatus] = useState<null | "checking" | "ok" | "error">(null);
+  const [hotjarTestMessage, setHotjarTestMessage] = useState("");
   const { data: integrationsData } = useQuery({
     queryKey: ["settings", "integrations"],
     queryFn: () => api.get<IntegrationsData>("/settings/integrations/all").then((r) => r.data),
@@ -819,19 +823,85 @@ export default function Settings() {
             Hotjar: тепловые карты, записи сессий, опросы. Clarity (Microsoft): записи сессий, клики, прокрутка — бесплатно.
           </p>
           <p className="text-slate-500 text-xs mb-2">Hotjar: <a href="https://www.hotjar.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">hotjar.com</a>. Clarity: <a href="https://clarity.microsoft.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">clarity.microsoft.com</a>.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
-            <input
-              value={integrations.hotjar_site_id ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, hotjar_site_id: e.target.value }))}
-              placeholder="Hotjar Site ID"
-              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-            />
-            <input
-              value={integrations.clarity_project_id ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, clarity_project_id: e.target.value }))}
-              placeholder="Microsoft Clarity Project ID"
-              className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-            />
+          <div className="space-y-3 mb-2">
+            <div className="flex gap-2 items-start">
+              <input
+                value={integrations.hotjar_site_id ?? ""}
+                onChange={(e) => {
+                  setIntegrations((p) => ({ ...p, hotjar_site_id: e.target.value }));
+                  setHotjarTestStatus(null);
+                }}
+                placeholder="Hotjar Site ID (число)"
+                className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const id = (integrations.hotjar_site_id ?? "").trim();
+                  if (!id) { toast.error("Введите Hotjar Site ID"); return; }
+                  setHotjarTestStatus("checking");
+                  api.post("/settings/test-external-api", { source: "hotjar", api_key: id })
+                    .then((r) => r.data as { ok: boolean; message: string })
+                    .then((data) => {
+                      setHotjarTestStatus(data.ok ? "ok" : "error");
+                      setHotjarTestMessage(data.message || "");
+                      toast[data.ok ? "success" : "error"](data.message);
+                    })
+                    .catch(() => {
+                      setHotjarTestStatus("error");
+                      setHotjarTestMessage("Ошибка проверки");
+                      toast.error("Ошибка проверки");
+                    });
+                }}
+                disabled={hotjarTestStatus === "checking" || !(integrations.hotjar_site_id ?? "").trim()}
+                className="px-4 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-1 whitespace-nowrap shrink-0"
+                title="Проверить ID"
+              >
+                <CheckCircle size={16} />
+                {hotjarTestStatus === "checking" ? "…" : "Проверить"}
+              </button>
+            </div>
+            {hotjarTestStatus === "ok" && <p className="text-emerald-400 text-sm flex items-center gap-2"><CheckCircle size={16} /> {hotjarTestMessage}</p>}
+            {hotjarTestStatus === "error" && hotjarTestMessage && <p className="text-red-400 text-sm">✕ {hotjarTestMessage}</p>}
+            <div className="flex gap-2 items-start">
+              <input
+                value={integrations.clarity_project_id ?? ""}
+                onChange={(e) => {
+                  setIntegrations((p) => ({ ...p, clarity_project_id: e.target.value }));
+                  setClarityTestStatus(null);
+                }}
+                placeholder="Microsoft Clarity Project ID"
+                className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const id = (integrations.clarity_project_id ?? "").trim();
+                  if (!id) { toast.error("Введите Clarity Project ID"); return; }
+                  setClarityTestStatus("checking");
+                  api.post("/settings/test-external-api", { source: "clarity", api_key: id })
+                    .then((r) => r.data as { ok: boolean; message: string })
+                    .then((data) => {
+                      setClarityTestStatus(data.ok ? "ok" : "error");
+                      setClarityTestMessage(data.message || "");
+                      toast[data.ok ? "success" : "error"](data.message);
+                    })
+                    .catch(() => {
+                      setClarityTestStatus("error");
+                      setClarityTestMessage("Ошибка проверки");
+                      toast.error("Ошибка проверки");
+                    });
+                }}
+                disabled={clarityTestStatus === "checking" || !(integrations.clarity_project_id ?? "").trim()}
+                className="px-4 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-1 whitespace-nowrap shrink-0"
+                title="Проверить ID"
+              >
+                <CheckCircle size={16} />
+                {clarityTestStatus === "checking" ? "…" : "Проверить"}
+              </button>
+            </div>
+            {clarityTestStatus === "ok" && <p className="text-emerald-400 text-sm flex items-center gap-2"><CheckCircle size={16} /> {clarityTestMessage}</p>}
+            {clarityTestStatus === "error" && clarityTestMessage && <p className="text-red-400 text-sm">✕ {clarityTestMessage}</p>}
           </div>
           <p className="text-slate-500 text-xs">Скрипты подставляются в страницы дорвеев автоматически при деплое.</p>
         </div>
