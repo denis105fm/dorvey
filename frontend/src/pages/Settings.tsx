@@ -503,7 +503,7 @@ export default function Settings() {
             {(integrations.keyword_provider ?? "dataforseo") === "fetchserp" && (
               <div>
                 <label className="block text-slate-400 text-sm mb-1">FetchSERP API Key</label>
-                <p className="text-slate-500 text-xs mb-1">Получить ключ: <a href="https://www.fetchserp.com/app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">fetchserp.com/app</a></p>
+                <p className="text-slate-500 text-xs mb-1">Получить ключ: <a href="https://www.fetchserp.com/app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">fetchserp.com/app</a>. Документация API: <a href="https://docs.fetchserp.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">docs.fetchserp.com</a></p>
                 <div className="flex gap-2">
                   <input
                     type="password"
