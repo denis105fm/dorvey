@@ -531,10 +531,11 @@ export default function Settings() {
                           setFetchserpTestMessage(data.message || "");
                           toast[data.ok ? "success" : "error"](data.message);
                         })
-                        .catch((e: { response?: { data?: { detail?: string } } }) => {
+                        .catch((e: { response?: { data?: { detail?: string; message?: string } } }) => {
                           setFetchserpTestStatus("error");
-                          setFetchserpTestMessage(e?.response?.data?.detail ?? "Ошибка запроса");
-                          toast.error(e?.response?.data?.detail ?? "Ошибка запроса");
+                          const msg = e?.response?.data?.message ?? e?.response?.data?.detail;
+                          setFetchserpTestMessage(msg ?? "Ошибка сервера. Попробуйте позже.");
+                          toast.error(msg ?? "Ошибка сервера. Попробуйте позже.");
                         });
                     }}
                     disabled={fetchserpTestStatus === "checking" || !(integrations.fetchserp_api_key ?? "").trim()}
