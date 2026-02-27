@@ -75,6 +75,8 @@ export default function Settings() {
   }>({});
   const [openaiTestStatus, setOpenaiTestStatus] = useState<null | "checking" | "ok" | "error">(null);
   const [openaiTestMessage, setOpenaiTestMessage] = useState("");
+  const [fetchserpTestStatus, setFetchserpTestStatus] = useState<null | "checking" | "ok" | "error">(null);
+  const [fetchserpTestMessage, setFetchserpTestMessage] = useState("");
   const { data: integrationsData } = useQuery({
     queryKey: ["settings", "integrations"],
     queryFn: () => api.get<IntegrationsData>("/settings/integrations/all").then((r) => r.data),
@@ -502,13 +504,57 @@ export default function Settings() {
               <div>
                 <label className="block text-slate-400 text-sm mb-1">FetchSERP API Key</label>
                 <p className="text-slate-500 text-xs mb-1">Получить ключ: <a href="https://www.fetchserp.com/app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">fetchserp.com/app</a></p>
-                <input
-                  type="password"
-                  value={integrations.fetchserp_api_key ?? ""}
-                  onChange={(e) => setIntegrations((p) => ({ ...p, fetchserp_api_key: e.target.value }))}
-                  placeholder="Ключ с fetchserp.com/app"
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={integrations.fetchserp_api_key ?? ""}
+                    onChange={(e) => {
+                      setIntegrations((p) => ({ ...p, fetchserp_api_key: e.target.value }));
+                      setFetchserpTestStatus(null);
+                    }}
+                    placeholder="Ключ с fetchserp.com/app"
+                    className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const key = (integrations.fetchserp_api_key ?? "").trim();
+                      if (!key) {
+                        toast.error("Введите API ключ");
+                        return;
+                      }
+                      setFetchserpTestStatus("checking");
+                      api.post("/settings/test-external-api", { source: "fetchserp", api_key: key })
+                        .then((r) => r.data as { ok: boolean; message: string })
+                        .then((data) => {
+                          setFetchserpTestStatus(data.ok ? "ok" : "error");
+                          setFetchserpTestMessage(data.message || "");
+                          toast[data.ok ? "success" : "error"](data.message);
+                        })
+                        .catch((e: { response?: { data?: { detail?: string } } }) => {
+                          setFetchserpTestStatus("error");
+                          setFetchserpTestMessage(e?.response?.data?.detail ?? "Ошибка запроса");
+                          toast.error(e?.response?.data?.detail ?? "Ошибка запроса");
+                        });
+                    }}
+                    disabled={fetchserpTestStatus === "checking" || !(integrations.fetchserp_api_key ?? "").trim()}
+                    className="px-4 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-1 whitespace-nowrap"
+                    title="Проверить ключ и подключение"
+                  >
+                    <CheckCircle size={16} />
+                    {fetchserpTestStatus === "checking" ? "Проверка…" : "Проверить"}
+                  </button>
+                </div>
+                {fetchserpTestStatus === "ok" && (
+                  <p className="flex items-center gap-2 text-emerald-400 text-sm mt-2">
+                    <CheckCircle size={18} /> Ключ действителен, подключение успешно
+                  </p>
+                )}
+                {fetchserpTestStatus === "error" && fetchserpTestMessage && (
+                  <p className="flex items-center gap-2 text-red-400 text-sm mt-2">
+                    <span className="text-red-400">✕</span> {fetchserpTestMessage}
+                  </p>
+                )}
               </div>
             )}
             <p className="text-slate-500 text-xs">Подсказки ключей по объёму и гео: Ключевые слова → Подтянуть из внешних источников.</p>

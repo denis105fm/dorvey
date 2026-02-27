@@ -76,3 +76,38 @@ async def fetch_keywords_for_keywords(
             cpc = 0.0
         out.append({"keyword": kw, "volume": vol, "cpc": cpc})
     return out
+
+
+async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
+    """
+    Validate FetchSERP API key by making a minimal request.
+    Returns (ok, message).
+    """
+    key = (api_key or "").strip()
+    if not key:
+        return False, "Укажите API ключ"
+    url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
+    params = {"keywords": "test", "country": "us"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Bearer {key}"},
+            )
+        if r.status_code == 200:
+            return True, "Ключ действителен, подключение успешно"
+        if r.status_code in (401, 403):
+            return False, "Неверный или недействительный ключ"
+        body = r.text[:200] if r.text else ""
+        try:
+            data = r.json()
+            err = data.get("error") or data.get("message") or body
+        except Exception:
+            err = body or f"HTTP {r.status_code}"
+        return False, err or f"Ошибка {r.status_code}"
+    except Exception as e:
+        msg = str(e).lower()
+        if "401" in msg or "auth" in msg or "invalid" in msg:
+            return False, "Неверный или недействительный ключ"
+        return False, str(e)[:150]

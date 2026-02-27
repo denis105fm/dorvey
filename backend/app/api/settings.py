@@ -220,7 +220,7 @@ async def test_external_api(
     country = (data.country or "us").lower()[:2]
     if not key:
         raise HTTPException(400, "Укажите API ключ")
-    allowed = ("newsapi", "gnews", "mediastack", "guardian")
+    allowed = ("newsapi", "gnews", "mediastack", "guardian", "fetchserp")
     if src not in allowed:
         raise HTTPException(400, f"Источник должен быть: {', '.join(allowed)}")
 
@@ -232,7 +232,12 @@ async def test_external_api(
     )
     result: dict = {"ok": False, "source": src, "message": ""}
     try:
-        if src == "newsapi":
+        if src == "fetchserp":
+            from app.services.fetchserp_service import validate_fetchserp_api_key
+            ok, message = await validate_fetchserp_api_key(key)
+            result["ok"] = ok
+            result["message"] = message
+        elif src == "newsapi":
             p = await fetch_news_api(country, key)
         elif src == "gnews":
             p = await fetch_gnews(country, key)
