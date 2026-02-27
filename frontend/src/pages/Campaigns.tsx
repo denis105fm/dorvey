@@ -511,6 +511,7 @@ export default function Campaigns() {
                 <input value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} placeholder="Locale" className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                 <input value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} placeholder="Валюта" className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               </div>
+              <p className="text-slate-500 text-xs">Для целевой страны в поиске укажите ту же страну в GSC (International Targeting) и выберите соответствующий регион (напр. US, RU).</p>
               <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
                 <option value="active">active</option>
                 <option value="paused">paused</option>

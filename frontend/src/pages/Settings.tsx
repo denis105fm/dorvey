@@ -493,6 +493,7 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Google Search Console</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">OAuth Client ID, Secret и Refresh Token для отправки sitemap.</p>
+          <p className="text-slate-500 text-xs mb-4">Для целевой страны в поиске укажите её в GSC → Настройки → International Targeting; регион кампании держите таким же (US, RU и т.д.).</p>
           <div className="space-y-4 mb-4">
             <input
               value={integrations.gsc_client_id ?? ""}
