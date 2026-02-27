@@ -273,6 +273,18 @@ async def test_external_api(
 GSC_SCOPE = "https://www.googleapis.com/auth/indexing"
 
 
+def _gsc_base_url(request: Request) -> str:
+    """Базовый URL для GSC OAuth: PUBLIC_APP_URL, иначе из заголовков прокси, иначе request.base_url."""
+    base = (settings.PUBLIC_APP_URL or "").strip().rstrip("/")
+    if base:
+        return base
+    proto = request.headers.get("X-Forwarded-Proto", "").strip().lower()
+    host = request.headers.get("X-Forwarded-Host", "").strip()
+    if proto and host:
+        return f"{proto}://{host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
 @router.get("/gsc-oauth-start")
 async def gsc_oauth_start(
     request: Request,
@@ -297,7 +309,7 @@ async def gsc_oauth_start(
             400,
             "Сначала сохраните Client ID и Client Secret в настройках и нажмите «Сохранить интеграции».",
         )
-    base = (settings.PUBLIC_APP_URL or "").strip().rstrip("/") or str(request.base_url).rstrip("/")
+    base = _gsc_base_url(request)
     redirect_uri = f"{base}/api/settings/gsc-oauth-callback"
     state_payload = {
         "sub": str(current_user.id),
@@ -334,7 +346,7 @@ async def gsc_oauth_callback(
     Callback после авторизации в Google: обмен code на refresh_token и сохранение.
     Редирект на /settings?gsc_token=ok или ?gsc_token=error.
     """
-    base = (settings.PUBLIC_APP_URL or "").strip().rstrip("/") or str(request.base_url).rstrip("/")
+    base = _gsc_base_url(request)
     frontend_settings = f"{base}/settings"
     if error:
         return RedirectResponse(url=f"{frontend_settings}?gsc_token=error&message={error}")
