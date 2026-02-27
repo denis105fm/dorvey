@@ -40,6 +40,8 @@ type IntegrationsData = {
   seasonality_data_url?: string | null;
   dataforseo_login?: string | null;
   dataforseo_password?: string | null;
+  keyword_provider?: string | null;
+  fetchserp_api_key?: string | null;
 };
 
 const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
@@ -203,6 +205,9 @@ export default function Settings() {
           </div>
           <p className="text-slate-400 text-sm mb-4">
             API ключ для генерации контента дорвеев, рекомендаций и авто-правок. Без ключа AI-функции отключены.
+          </p>
+          <p className="text-slate-500 text-xs mb-2">
+            Регистрация и ключ: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">platform.openai.com/api-keys</a>
           </p>
           <div className="flex gap-2 items-start mb-2">
             <input
@@ -390,6 +395,7 @@ export default function Settings() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-400 text-sm mb-1">GNews API Key (опц.)</label>
+                <p className="text-slate-500 text-xs mb-1">Регистрация: <a href="https://gnews.io/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">gnews.io</a></p>
                 <div className="flex gap-2">
                   <input
                     value={integrations.gnews_api_key ?? ""}
@@ -410,6 +416,7 @@ export default function Settings() {
               </div>
               <div>
                 <label className="block text-slate-400 text-sm mb-1">Mediastack API Key (опц.)</label>
+                <p className="text-slate-500 text-xs mb-1">Регистрация: <a href="https://mediastack.com/signup" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">mediastack.com/signup</a></p>
                 <div className="flex gap-2">
                   <input
                     value={integrations.mediastack_api_key ?? ""}
@@ -430,6 +437,7 @@ export default function Settings() {
               </div>
               <div>
                 <label className="block text-slate-400 text-sm mb-1">Guardian API Key (опц.)</label>
+                <p className="text-slate-500 text-xs mb-1">Регистрация: <a href="https://open-platform.theguardian.com/access/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">open-platform.theguardian.com/access</a></p>
                 <div className="flex gap-2">
                   <input
                     value={integrations.guardian_api_key ?? ""}
@@ -451,6 +459,60 @@ export default function Settings() {
             </div>
             <p className="text-slate-500 text-xs">Новости: приоритет NewsAPI; при его отсутствии используются GNews, Mediastack, Guardian.</p>
             <div>
+              <label className="block text-slate-400 text-sm mb-1">Провайдер подсказки ключей</label>
+              <select
+                value={integrations.keyword_provider ?? "dataforseo"}
+                onChange={(e) => setIntegrations((p) => ({ ...p, keyword_provider: e.target.value || "dataforseo" }))}
+                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
+              >
+                <option value="dataforseo">DataForSeo — платный, для компаний (логин + пароль API)</option>
+                <option value="fetchserp">FetchSERP — 250 бесплатных кредитов, физлица (API ключ)</option>
+              </select>
+              <p className="text-slate-500 text-xs mt-1">
+                {integrations.keyword_provider === "fetchserp"
+                  ? "Подсказки ключей и объём по странам. Бесплатный старт на fetchserp.com, затем кредиты."
+                  : "Большая база ключей по гео. Платный сервис, часто только для юрлиц (app.dataforseo.com)."}
+              </p>
+            </div>
+            {(integrations.keyword_provider ?? "dataforseo") === "dataforseo" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 text-sm mb-1">DataForSeo Login</label>
+                  <p className="text-slate-500 text-xs mb-1">Вход/регистрация: <a href="https://app.dataforseo.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">app.dataforseo.com</a></p>
+                  <input
+                    value={integrations.dataforseo_login ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_login: e.target.value }))}
+                    placeholder="Логин с app.dataforseo.com"
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-sm mb-1">DataForSeo Password</label>
+                  <input
+                    type="password"
+                    value={integrations.dataforseo_password ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_password: e.target.value }))}
+                    placeholder="Пароль API"
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                </div>
+              </div>
+            )}
+            {(integrations.keyword_provider ?? "dataforseo") === "fetchserp" && (
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">FetchSERP API Key</label>
+                <p className="text-slate-500 text-xs mb-1">Получить ключ: <a href="https://www.fetchserp.com/app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">fetchserp.com/app</a></p>
+                <input
+                  type="password"
+                  value={integrations.fetchserp_api_key ?? ""}
+                  onChange={(e) => setIntegrations((p) => ({ ...p, fetchserp_api_key: e.target.value }))}
+                  placeholder="Ключ с fetchserp.com/app"
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                />
+              </div>
+            )}
+            <p className="text-slate-500 text-xs">Подсказки ключей по объёму и гео: Ключевые слова → Подтянуть из внешних источников.</p>
+            <div>
               <label className="block text-slate-400 text-sm mb-1">URL данных сезонности (опционально)</label>
               <input
                 value={integrations.seasonality_data_url ?? ""}
@@ -459,28 +521,6 @@ export default function Settings() {
                 className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-400 text-sm mb-1">DataForSeo Login</label>
-                <input
-                  value={integrations.dataforseo_login ?? ""}
-                  onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_login: e.target.value }))}
-                  placeholder="Логин с app.dataforseo.com"
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-400 text-sm mb-1">DataForSeo Password</label>
-                <input
-                  type="password"
-                  value={integrations.dataforseo_password ?? ""}
-                  onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_password: e.target.value }))}
-                  placeholder="Пароль API"
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-                />
-              </div>
-            </div>
-            <p className="text-slate-500 text-xs">DataForSeo — подбор ключевых слов по объёму и гео (Ключевые слова → Подтянуть из внешних источников)</p>
           </div>
           <div className="rounded-lg bg-slate-800/80 border border-slate-600 p-3 text-sm space-y-2">
             <p className="text-slate-300 font-medium">Какие ещё источники подключать и как:</p>
@@ -498,6 +538,9 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Уведомления</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">Telegram и Slack — уведомления о деплое и событиях.</p>
+          <p className="text-slate-500 text-xs mb-2">
+            Telegram: бот — <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">t.me/BotFather</a>, Chat ID — через <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">@userinfobot</a>. Slack: <a href="https://api.slack.com/messaging/webhooks" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Incoming Webhooks</a>.
+          </p>
           <div className="space-y-4 mb-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <input
@@ -537,6 +580,9 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Google Search Console</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">OAuth Client ID, Secret и Refresh Token для отправки sitemap.</p>
+          <p className="text-slate-500 text-xs mb-2">
+            GSC: <a href="https://search.google.com/search-console" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">search.google.com/search-console</a>. OAuth-ключи: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Google Cloud Console → Credentials</a>.
+          </p>
           <p className="text-slate-500 text-xs mb-4">Для целевой страны в поиске укажите её в GSC → Настройки → International Targeting; регион кампании держите таким же (US, RU и т.д.).</p>
           <div className="space-y-4 mb-4">
             <input
@@ -567,6 +613,7 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Bing Webmaster</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">API ключ для отправки sitemap в Bing.</p>
+          <p className="text-slate-500 text-xs mb-2">Регистрация: <a href="https://www.bing.com/webmasters" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">bing.com/webmasters</a></p>
           <input
             value={integrations.bing_api_key ?? ""}
             onChange={(e) => setIntegrations((p) => ({ ...p, bing_api_key: e.target.value }))}
@@ -597,6 +644,7 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Voluum / Binom</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">API для трекинга конверсий.</p>
+          <p className="text-slate-500 text-xs mb-2">Voluum: <a href="https://voluum.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">voluum.com</a> (API в кабинете). Binom: <a href="https://binom.org/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">binom.org</a> (API в настройках).</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <input
               value={integrations.voluum_api_key ?? ""}
@@ -636,6 +684,7 @@ export default function Settings() {
           <p className="text-slate-500 text-xs mb-4">
             Hotjar: тепловые карты, записи сессий, опросы. Clarity (Microsoft): записи сессий, клики, прокрутка — бесплатно.
           </p>
+          <p className="text-slate-500 text-xs mb-2">Hotjar: <a href="https://www.hotjar.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">hotjar.com</a>. Clarity: <a href="https://clarity.microsoft.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">clarity.microsoft.com</a>.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
             <input
               value={integrations.hotjar_site_id ?? ""}
@@ -738,6 +787,7 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Ретаргетинг (Facebook / Google)</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">Пиксели для создания аудиторий и ретаргетинга.</p>
+          <p className="text-slate-500 text-xs mb-2">Facebook Pixel: <a href="https://business.facebook.com/events_manager" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">business.facebook.com → Events Manager</a>. Google Ads: <a href="https://ads.google.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">ads.google.com</a> → Инструменты → Конверсии.</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-slate-400 text-sm mb-1">Facebook Pixel ID</label>

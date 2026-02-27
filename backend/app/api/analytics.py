@@ -339,7 +339,7 @@ async def click_redirect(
         .where(Offer.campaign_id == camp.id, Offer.is_active == True)
         .order_by(Offer.priority.desc())
     )
-    offers_list = [{"id": o.id, "url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in off_r.scalars().all()]
+    offers_list = [{"id": o.id, "url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active, "rate": o.rate} for o in off_r.scalars().all()]
     chosen_offer_id = oid
     if offers_list:
         best_url, best_oid = await get_best_offer_url_by_roi(db, offers_list, geo=geo, device=device)
@@ -528,7 +528,7 @@ async def send_push(
                 select(Offer).where(Offer.campaign_id == camp_id, Offer.is_active == True).order_by(Offer.priority.desc())
             )
             offers_raw = off_r.scalars().all()
-            offers_list = [{"id": o.id, "url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active} for o in offers_raw]
+            offers_list = [{"id": o.id, "url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active, "rate": o.rate} for o in offers_raw]
             if offers_list:
                 best_url, best_oid = await get_best_offer_url_by_roi(db, offers_list, None, None)
                 dw_id = subs[0].doorway_id if subs else None

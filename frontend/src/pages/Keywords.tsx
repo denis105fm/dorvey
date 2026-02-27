@@ -42,7 +42,7 @@ export default function Keywords() {
   });
 
   const importSuggestMut = useMutation({
-    mutationFn: (d: { campaign_id: number; items: { keyword: string; volume: number; cpc: number }[]; region?: string }) =>
+    mutationFn: (d: { campaign_id: number; items: { keyword: string; volume: number; cpc: number }[]; region?: string; source?: string }) =>
       api.post("/keywords/bulk-import-from-suggest", d).then((r) => r.data),
     onSuccess: (_, v) => {
       qc.invalidateQueries({ queryKey: ["keywords", campaignId] });
@@ -55,6 +55,34 @@ export default function Keywords() {
     mutationFn: (data: { campaign_id: number; keywords: string[]; volume: number }) => api.post("/keywords/bulk", data).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["keywords", campaignId] }); fileRef.current && (fileRef.current.value = ""); },
   });
+
+  const { data: startupNiches } = useQuery({
+    queryKey: ["keywords", "startup-niches"],
+    queryFn: () => api.get("/keywords/startup-niches").then((r) => r.data),
+  });
+
+  const startupKwMut = useMutation({
+    mutationFn: (d: { seeds: string[]; country: string; limit_per_seed: number; campaign_id?: number; auto_import: boolean }) =>
+      api.post("/keywords/startup-keywords", d).then((r) => r.data),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["keywords", campaignId] });
+      toast.success(data.imported ? `Подтянуто ключей: ${data.keywords?.length ?? 0}, импортировано: ${data.imported}` : `Подтянуто ключей: ${data.keywords?.length ?? 0}`);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
+
+  const autoPullMut = useMutation({
+    mutationFn: (d: { campaign_id: number; seed: string; country: string; limit: number }) =>
+      api.post("/keywords/auto-pull-and-import", d).then((r) => r.data),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["keywords", campaignId] });
+      toast.success(`Авто-импорт: добавлено ${data.imported} ключей (${data.source})`);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
+
+  const [startupSeeds, setStartupSeeds] = useState<string[]>([]);
+  const [autoPullSeed, setAutoPullSeed] = useState("");
 
   const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -96,8 +124,8 @@ export default function Keywords() {
       </div>
 
       <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-800/50">
-        <h2 className="text-lg font-medium text-white mb-3">Подтянуть из внешних источников (DataForSeo)</h2>
-        <p className="text-slate-400 text-sm mb-3">Ключи с объёмом по гео. Настройте DataForSeo в Настройках → Интеграции.</p>
+        <h2 className="text-lg font-medium text-white mb-3">Подтянуть из внешних источников</h2>
+        <p className="text-slate-400 text-sm mb-3">Ключи с объёмом по гео. Выберите провайдера (DataForSeo или FetchSERP) в <a href="/settings" className="text-emerald-400 hover:underline">Настройках → Интеграции</a>. Регистрация: <a href="https://app.dataforseo.com/register" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">DataForSeo</a>, <a href="https://www.fetchserp.com/app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">FetchSERP</a>.</p>
         <div className="flex flex-wrap items-end gap-3 mb-3">
           <div>
             <label className="block text-slate-400 text-xs mb-1">Стартовый запрос (seed)</label>
@@ -145,7 +173,12 @@ export default function Keywords() {
             <div className="flex items-center justify-between">
               <span className="text-slate-400 text-sm">Выберите ключи для импорта (сортировка по объёму):</span>
               <button
-                onClick={() => importSuggestMut.mutate({ campaign_id: campaignId, items: selectedSuggest, region: (suggestByOffersMut.data ? undefined : suggestCountry) })}
+                onClick={() => importSuggestMut.mutate({
+                  campaign_id: campaignId,
+                  items: selectedSuggest,
+                  region: (suggestByOffersMut.data ? undefined : suggestCountry),
+                  source: (suggestMut.data || suggestByOffersMut.data)?.source,
+                })}
                 disabled={selectedSuggest.length === 0 || importSuggestMut.isPending}
                 className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-sm"
               >
@@ -172,9 +205,90 @@ export default function Keywords() {
           </div>
         ) : (suggestMut.isError || suggestByOffersMut.isError) ? (
           <p className="text-amber-400 text-sm">
-            {((suggestMut.error || suggestByOffersMut.error) as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка. Укажите DataForSeo в Настройках → Интеграции."}
+            {((suggestMut.error || suggestByOffersMut.error) as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка. Выберите провайдера подсказки ключей в Настройках → Интеграции и укажите API данные."}
           </p>
         ) : null}
+      </div>
+
+      <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-800/50">
+        <h2 className="text-lg font-medium text-white mb-2">Стартовый набор ниш</h2>
+        <p className="text-slate-400 text-sm mb-3">Подтянуть ключи по готовым нишам из справочника. Можно сразу импортировать в кампанию.</p>
+        {startupNiches?.niches?.length ? (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {startupNiches.niches.map((n: { id: string; name: string; seeds: string[] }) => {
+              const isSelected = n.seeds.some((s) => startupSeeds.includes(s));
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => setStartupSeeds((prev) => isSelected ? prev.filter((s) => !n.seeds.includes(s)) : [...prev, ...n.seeds])}
+                  className={`px-3 py-1.5 rounded-lg text-sm ${isSelected ? "bg-violet-600 text-white" : "bg-slate-700 text-slate-300 hover:bg-slate-600"}`}
+                >
+                  {n.name}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-end gap-2">
+          <input
+            value={startupSeeds.join(", ")}
+            onChange={(e) => setStartupSeeds(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+            placeholder="Или введите seed-фразы через запятую"
+            className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white w-72"
+          />
+          <select
+            value={suggestCountry}
+            onChange={(e) => setSuggestCountry(e.target.value)}
+            className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
+          >
+            <option value="RU">RU</option>
+            <option value="US">US</option>
+            <option value="KZ">KZ</option>
+          </select>
+          <button
+            onClick={() => startupKwMut.mutate({ seeds: startupSeeds.length ? startupSeeds : ["займ на карту"], country: suggestCountry, limit_per_seed: 25, auto_import: false })}
+            disabled={startupKwMut.isPending}
+            className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm"
+          >
+            {startupKwMut.isPending ? "…" : "Только подтянуть"}
+          </button>
+          <button
+            onClick={() => startupKwMut.mutate({ seeds: startupSeeds.length ? startupSeeds : ["займ на карту"], country: suggestCountry, limit_per_seed: 25, campaign_id: campaignId, auto_import: true })}
+            disabled={startupKwMut.isPending}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm"
+          >
+            {startupKwMut.isPending ? "…" : "Подтянуть и импортировать"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-800/50">
+        <h2 className="text-lg font-medium text-white mb-2">Авто-подтянуть ключи</h2>
+        <p className="text-slate-400 text-sm mb-3">Система сама подтянет ключи из выбранного провайдера и сразу добавит их в кампанию (без ручного выбора).</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <input
+            value={autoPullSeed}
+            onChange={(e) => setAutoPullSeed(e.target.value)}
+            placeholder="Стартовая фраза (seed)"
+            className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white w-48"
+          />
+          <select
+            value={suggestCountry}
+            onChange={(e) => setSuggestCountry(e.target.value)}
+            className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
+          >
+            <option value="RU">RU</option>
+            <option value="US">US</option>
+          </select>
+          <button
+            onClick={() => autoPullMut.mutate({ campaign_id: campaignId, seed: autoPullSeed || suggestSeed || "займ", country: suggestCountry, limit: 40 })}
+            disabled={autoPullMut.isPending}
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm"
+          >
+            {autoPullMut.isPending ? "Загрузка…" : "Подтянуть и импортировать"}
+          </button>
+        </div>
       </div>
       {isLoading ? (
         <p className="text-slate-400">Загрузка...</p>

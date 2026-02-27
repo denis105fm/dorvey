@@ -10,6 +10,25 @@ _cache: dict[str, tuple[dict, float]] = {}
 _CACHE_TTL_SEC = 3600  # 1 hour
 
 
+def get_seasonality_heuristic(country_code: str) -> dict[str, Any]:
+    """
+    Встроенная эвристика сезонности по странам и месяцам (когда URL не задан).
+    Возвращает dict: { "1": 1.2, "2": 1.1, ... "12": 0.9, "source": "heuristic" }.
+    Северное полушарие: пики в янв–фев (новый год, займы), сен (школа, осень).
+    """
+    country = (country_code or "us").lower()[:2]
+    # Северное полушарие: RU, US, DE, FR, PL, UA, KZ, BY, ...
+    northern = {"ru", "us", "de", "fr", "gb", "pl", "ua", "kz", "by", "it", "es", "tr", "in", "jp", "cn", "nl", "ch"}
+    if country not in northern:
+        return {"source": "heuristic", "default": 1.0}
+    # Коэффициенты по месяцам (1–12): выше = сезонный спрос
+    by_month = {
+        1: 1.25, 2: 1.15, 3: 1.0, 4: 0.95, 5: 0.9, 6: 0.9,
+        7: 0.95, 8: 0.95, 9: 1.1, 10: 1.05, 11: 1.1, 12: 1.2,
+    }
+    return {"source": "heuristic", **{str(m): round(v, 2) for m, v in by_month.items()}}
+
+
 def _cache_key(source: str, country: str, days: int) -> str:
     return f"{source}:{country}:{days}"
 
@@ -232,6 +251,11 @@ async def get_external_signals(
                 out["sources_used"].append("seasonality")
             except Exception:
                 out["seasonality"] = {"error": "fetch_failed"}
+    else:
+        # Встроенная эвристика сезонности по странам и месяцам (когда URL не задан)
+        out["seasonality"] = get_seasonality_heuristic(country)
+        if out["seasonality"] and "error" not in out["seasonality"]:
+            out["sources_used"].append("seasonality_heuristic")
 
     # REST Countries (free, no key) — metadata for geo
     cc_key = f"restcountries:{country}"

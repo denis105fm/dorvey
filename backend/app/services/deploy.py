@@ -216,6 +216,22 @@ def _get_best_offer_url(offers: list, geo: Optional[str] = None, device: Optiona
     return offers[0].get("url") if offers else None
 
 
+def _cold_start_offer_score(o: dict) -> tuple[float, int]:
+    """
+    Скор для приоритета оффера при нулевых данных (холодный старт).
+    Учитываем: приоритет оффера, парсим rate (выплата) как число.
+    """
+    priority = int(o.get("priority") or 0)
+    rate_val = 0.0
+    try:
+        r = (o.get("rate") or "").strip().replace("$", "").replace(",", ".").replace(" ", "")
+        if r:
+            rate_val = float(r)
+    except (ValueError, TypeError):
+        pass
+    return (rate_val * 0.1 + priority, priority)
+
+
 async def get_best_offer_url_by_roi(
     db: AsyncSession,
     offers: list,
@@ -264,6 +280,12 @@ async def get_best_offer_url_by_roi(
         .group_by(OfferMetrics.offer_id)
     )
     rows = {row.offer_id: (int(row.clk or 0), float(row.rev or 0)) for row in r.all()}
+
+    has_any_clicks = any(clk >= 5 for clk, _ in rows.values()) if rows else False
+    if not has_any_clicks:
+        # Приоритет офферов при нуле: холодный старт по score (rate, priority, качество)
+        best = max(filtered, key=lambda o: _cold_start_offer_score(o))
+        return best.get("url"), best.get("id")
 
     def roi(o):
         oid = o.get("id")
