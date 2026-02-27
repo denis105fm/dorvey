@@ -111,7 +111,10 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
             err = data.get("error") or data.get("message") or body
         except Exception:
             err = body or f"HTTP {r.status_code}"
-        return False, err or f"Ошибка {r.status_code}"
+        err = (err or f"Ошибка {r.status_code}").strip()
+        if r.status_code >= 500 or (err and err.lower() in ("internal server error", "internal server error.")):
+            return False, "Сервис FetchSERP временно недоступен. Попробуйте позже."
+        return False, err
     except Exception as e:
         msg = str(e).lower()
         if "401" in msg or "auth" in msg or "invalid" in msg:
