@@ -113,7 +113,7 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
             err = body or f"HTTP {r.status_code}"
         err = (err or f"Ошибка {r.status_code}").strip()
         if r.status_code >= 500 or (err and err.lower() in ("internal server error", "internal server error.")):
-            return False, "Сервис FetchSERP временно недоступен. Попробуйте позже."
+            return False, "Сервис FetchSERP вернул ошибку. Скопируйте ключ заново из fetchserp.com/app (без пробелов) и нажмите «Проверить» снова. Если не поможет — попробуйте позже."
         return False, err
     except Exception as e:
         msg = str(e).lower()
