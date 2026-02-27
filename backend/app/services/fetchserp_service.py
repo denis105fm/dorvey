@@ -36,7 +36,8 @@ async def fetch_keywords_for_keywords(
         return []
     cc = _country_code(country)
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    params = {"keywords": seed_clean, "country": cc}
+    # По доке: keywords — массив строк; передаём как keywords=seed
+    params = [("keywords", seed_clean), ("country", cc)]
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
             url,
@@ -49,13 +50,17 @@ async def fetch_keywords_for_keywords(
     if r.status_code != 200:
         return []
     data = r.json()
-    # Response may be { "keyword_suggestions": [ { "keyword", "search_volume", "cpc" } ] } or similar
+    # По доке: ответ { "data": { "keywords_suggestions": [ { "keyword", "avg_monthly_searches", ... } ] } }
+    inner = data.get("data") if isinstance(data.get("data"), dict) else {}
     raw_list = (
-        data.get("keyword_suggestions")
+        inner.get("keywords_suggestions")
+        or data.get("keyword_suggestions")
         or data.get("keywords")
         or data.get("data")
         or (data if isinstance(data, list) else [])
     )
+    if not isinstance(raw_list, list):
+        raw_list = []
     out: list[dict] = []
     seen: set[str] = set()
     for item in raw_list[:limit]:
@@ -64,7 +69,7 @@ async def fetch_keywords_for_keywords(
             vol, cpc = 0, 0.0
         else:
             kw = (item.get("keyword") or item.get("key") or item.get("query") or "").strip()
-            vol = item.get("search_volume") or item.get("volume") or item.get("search_volume_avg") or 0
+            vol = item.get("search_volume") or item.get("volume") or item.get("search_volume_avg") or item.get("avg_monthly_searches") or 0
             cpc = item.get("cpc") or item.get("avg_cpc") or 0.0
         if not kw or kw.lower() in seen:
             continue
@@ -90,7 +95,8 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
     if not key:
         return False, "Укажите API ключ"
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    params = {"keywords": "test", "country": "us"}
+    # По доке FetchSERP: keywords — массив строк (GET ?keywords=test&country=us)
+    params = [("keywords", "test"), ("country", "us")]
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(
@@ -113,8 +119,8 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
             err = body or f"HTTP {r.status_code}"
         err = (err or f"Ошибка {r.status_code}").strip()
         if r.status_code >= 500 or (err and err.lower() in ("internal server error", "internal server error.")):
-            return False, "Сервис FetchSERP вернул ошибку. Скопируйте ключ заново из fetchserp.com/app (без пробелов) и нажмите «Проверить» снова. Если не поможет — попробуйте позже."
-        return False, err
+            return False, f"Сервис FetchSERP вернул ошибку (HTTP {r.status_code}). Скопируйте ключ заново из fetchserp.com/app (без пробелов) и нажмите «Проверить» снова. Если не поможет — попробуйте позже."
+        return False, f"FetchSERP (HTTP {r.status_code}): {err}"
     except Exception as e:
         msg = str(e).lower()
         if "401" in msg or "auth" in msg or "invalid" in msg:
