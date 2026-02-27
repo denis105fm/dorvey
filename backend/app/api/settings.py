@@ -237,6 +237,7 @@ async def test_external_api(
             ok, message = await validate_fetchserp_api_key(key)
             result["ok"] = ok
             result["message"] = message
+            return result
         elif src == "newsapi":
             p = await fetch_news_api(country, key)
         elif src == "gnews":
