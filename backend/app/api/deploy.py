@@ -13,8 +13,28 @@ from app.models.domain import Domain
 from app.models.setting import Setting
 from app.models.server import Server
 from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl
+from app.services.indexing import get_doorway_url
 
 router = APIRouter()
+
+
+async def _submit_to_indexing_after_deploy(url: str, user_id: int, creds: dict) -> None:
+    """Фоновая отправка URL в GSC и Bing после деплоя."""
+    from app.services.indexing_submit import submit_to_gsc, submit_to_bing
+    from app.services.gsc_ratelimit import check_gsc_limit, record_gsc_submission
+    if creds.get("gsc_client_id") and creds.get("gsc_client_secret") and creds.get("gsc_refresh_token"):
+        allowed, _ = check_gsc_limit(user_id)
+        if allowed:
+            gsc_ok, _ = await submit_to_gsc(
+                url,
+                creds["gsc_client_id"],
+                creds["gsc_client_secret"],
+                creds["gsc_refresh_token"],
+            )
+            if gsc_ok:
+                record_gsc_submission(user_id)
+    if creds.get("bing_api_key"):
+        await submit_to_bing(url, creds["bing_api_key"])
 
 
 class BatchDeployRequest(BaseModel):
@@ -129,6 +149,20 @@ async def deploy_doorway(
         })
     except Exception:
         pass
+    url = await get_doorway_url(db, doorway_id)
+    if url:
+        cred_r = await db.execute(
+            select(Setting).where(
+                Setting.user_id == current_user.id,
+                Setting.key.in_([
+                    "gsc_client_id", "gsc_client_secret", "gsc_refresh_token",
+                    "bing_api_key",
+                ]),
+            )
+        )
+        creds = {s.key: (s.value or "").strip() for s in cred_r.scalars().all()}
+        if creds.get("gsc_client_id") or creds.get("bing_api_key"):
+            background_tasks.add_task(_submit_to_indexing_after_deploy, url, current_user.id, creds)
     return {"status": "ok", "message": msg}
 
 

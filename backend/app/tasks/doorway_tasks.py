@@ -131,9 +131,10 @@ def deploy_batch_with_stagger(
     from app.models.campaign import Campaign
     from app.models.setting import Setting
     from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push
+    from app.services.indexing import get_doorway_url
     from datetime import datetime
 
-    cfg = StaggerConfig(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)
+    cfg = StaggerConfig(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)
     results: list = []
     total = len(doorway_ids)
 
@@ -188,6 +189,31 @@ def deploy_batch_with_stagger(
                 dw.status = "deployed"
                 dw.deployed_at = datetime.utcnow()
                 results.append({"doorway_id": dw_id, "ok": True, "msg": msg})
+                url = await get_doorway_url(db, dw_id)
+                if url and camp:
+                    cred_r = await db.execute(
+                        select(Setting).where(
+                            Setting.user_id == camp.user_id,
+                            Setting.key.in_([
+                                "gsc_client_id", "gsc_client_secret", "gsc_refresh_token",
+                                "bing_api_key",
+                            ]),
+                        )
+                    )
+                    creds = {s.key: (s.value or "").strip() for s in cred_r.scalars().all()}
+                    if creds.get("gsc_client_id") or creds.get("bing_api_key"):
+                        from app.services.indexing_submit import submit_to_gsc, submit_to_bing
+                        from app.services.gsc_ratelimit import check_gsc_limit, record_gsc_submission
+                        if creds.get("gsc_client_id") and creds.get("gsc_client_secret") and creds.get("gsc_refresh_token"):
+                            allowed, _ = check_gsc_limit(camp.user_id)
+                            if allowed:
+                                gsc_ok, _ = await submit_to_gsc(
+                                    url, creds["gsc_client_id"], creds["gsc_client_secret"], creds["gsc_refresh_token"],
+                                )
+                                if gsc_ok:
+                                    record_gsc_submission(camp.user_id)
+                        if creds.get("bing_api_key"):
+                            await submit_to_bing(url, creds["bing_api_key"])
             await db.commit()
         return {"status": "ok", "results": results}
 

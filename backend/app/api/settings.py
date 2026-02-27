@@ -1,14 +1,20 @@
 """Settings API."""
 
 import json
+from datetime import datetime, timedelta
 from typing import Any, Optional
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import httpx
+from jose import JWTError, jwt
 
 from app.api.deps import CurrentUser
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.setting import Setting
 
@@ -262,6 +268,135 @@ async def test_external_api(
     except Exception as e:
         result["message"] = str(e)[:200]
     return result
+
+
+GSC_SCOPE = "https://www.googleapis.com/auth/indexing"
+
+
+@router.get("/gsc-oauth-start")
+async def gsc_oauth_start(
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Начать OAuth для GSC: вернуть URL для редиректа в Google.
+    Требует сохранённые gsc_client_id и gsc_client_secret у пользователя.
+    """
+    r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == current_user.id,
+            Setting.key.in_(["gsc_client_id", "gsc_client_secret"]),
+        )
+    )
+    creds = {s.key: (s.value or "").strip() for s in r.scalars().all()}
+    cid = creds.get("gsc_client_id")
+    secret = creds.get("gsc_client_secret")
+    if not cid or not secret:
+        raise HTTPException(
+            400,
+            "Сначала сохраните Client ID и Client Secret в настройках и нажмите «Сохранить интеграции».",
+        )
+    base = str(request.base_url).rstrip("/")
+    redirect_uri = f"{base}/api/settings/gsc-oauth-callback"
+    state_payload = {
+        "sub": str(current_user.id),
+        "purpose": "gsc_oauth",
+        "exp": datetime.utcnow() + timedelta(minutes=10),
+    }
+    state = jwt.encode(
+        state_payload,
+        settings.SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    params = {
+        "client_id": cid,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": GSC_SCOPE,
+        "state": state,
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+    return {"redirect_url": url}
+
+
+@router.get("/gsc-oauth-callback")
+async def gsc_oauth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Callback после авторизации в Google: обмен code на refresh_token и сохранение.
+    Редирект на /settings?gsc_token=ok или ?gsc_token=error.
+    """
+    base = str(request.base_url).rstrip("/")
+    frontend_settings = f"{base}/settings"
+    if error:
+        return RedirectResponse(url=f"{frontend_settings}?gsc_token=error&message={error}")
+    if not code or not state:
+        return RedirectResponse(url=f"{frontend_settings}?gsc_token=error&message=missing_code")
+    try:
+        payload = jwt.decode(
+            state,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+        if payload.get("purpose") != "gsc_oauth":
+            return RedirectResponse(url=f"{frontend_settings}?gsc_token=error")
+        user_id = int(payload.get("sub", 0))
+    except (JWTError, ValueError):
+        return RedirectResponse(url=f"{frontend_settings}?gsc_token=error")
+    if not user_id:
+        return RedirectResponse(url=f"{frontend_settings}?gsc_token=error")
+
+    r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == user_id,
+            Setting.key.in_(["gsc_client_id", "gsc_client_secret"]),
+        )
+    )
+    creds = {s.key: (s.value or "").strip() for s in r.scalars().all()}
+    cid = creds.get("gsc_client_id")
+    secret = creds.get("gsc_client_secret")
+    if not cid or not secret:
+        return RedirectResponse(url=f"{frontend_settings}?gsc_token=error&message=no_creds")
+
+    redirect_uri = f"{base}/api/settings/gsc-oauth-callback"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": cid,
+                "client_secret": secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        return RedirectResponse(url=f"{frontend_settings}?gsc_token=error&message=exchange_failed")
+    data = resp.json()
+    refresh_token = data.get("refresh_token")
+    if not refresh_token:
+        return RedirectResponse(url=f"{frontend_settings}?gsc_token=error&message=no_refresh_token")
+
+    r = await db.execute(
+        select(Setting).where(Setting.user_id == user_id, Setting.key == "gsc_refresh_token")
+    )
+    s = r.scalar_one_or_none()
+    if s:
+        s.value = refresh_token
+    else:
+        db.add(Setting(user_id=user_id, key="gsc_refresh_token", value=refresh_token))
+    await db.commit()
+    return RedirectResponse(url=f"{frontend_settings}?gsc_token=ok")
 
 
 @router.put("/integrations/all")
