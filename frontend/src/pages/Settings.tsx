@@ -71,6 +71,8 @@ export default function Settings() {
     primary_color?: string;
     favicon_url?: string;
   }>({});
+  const [openaiTestStatus, setOpenaiTestStatus] = useState<null | "checking" | "ok" | "error">(null);
+  const [openaiTestMessage, setOpenaiTestMessage] = useState("");
   const { data: integrationsData } = useQuery({
     queryKey: ["settings", "integrations"],
     queryFn: () => api.get<IntegrationsData>("/settings/integrations/all").then((r) => r.data),
@@ -202,13 +204,55 @@ export default function Settings() {
           <p className="text-slate-400 text-sm mb-4">
             API ключ для генерации контента дорвеев, рекомендаций и авто-правок. Без ключа AI-функции отключены.
           </p>
-          <input
-            value={integrations.openai_api_key ?? ""}
-            onChange={(e) => setIntegrations((p) => ({ ...p, openai_api_key: e.target.value }))}
-            placeholder="sk-..."
-            type="password"
-            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 mb-2"
-          />
+          <div className="flex gap-2 items-start mb-2">
+            <input
+              value={integrations.openai_api_key ?? ""}
+              onChange={(e) => {
+                setIntegrations((p) => ({ ...p, openai_api_key: e.target.value }));
+                setOpenaiTestStatus(null);
+              }}
+              placeholder="sk-..."
+              type="password"
+              className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const key = (integrations.openai_api_key ?? "").trim();
+                if (!key) {
+                  toast.error("Введите API ключ");
+                  return;
+                }
+                setOpenaiTestStatus("checking");
+                api.post("/settings/test-openai", { api_key: key })
+                  .then((r) => r.data as { ok: boolean; message: string })
+                  .then((data) => {
+                    setOpenaiTestStatus(data.ok ? "ok" : "error");
+                    setOpenaiTestMessage(data.message);
+                    toast[data.ok ? "success" : "error"](data.message);
+                  })
+                  .catch((e: { response?: { data?: { detail?: string } } }) => {
+                    setOpenaiTestStatus("error");
+                    setOpenaiTestMessage(e?.response?.data?.detail ?? "Ошибка запроса");
+                    toast.error(e?.response?.data?.detail ?? "Ошибка запроса");
+                  });
+              }}
+              disabled={openaiTestStatus === "checking" || !(integrations.openai_api_key ?? "").trim()}
+              className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white text-sm whitespace-nowrap"
+            >
+              {openaiTestStatus === "checking" ? "Проверка…" : "Проверить"}
+            </button>
+          </div>
+          {openaiTestStatus === "ok" && (
+            <p className="flex items-center gap-2 text-emerald-400 text-sm mb-2">
+              <CheckCircle size={18} /> Ключ активен, AI доступен
+            </p>
+          )}
+          {openaiTestStatus === "error" && openaiTestMessage && (
+            <p className="flex items-center gap-2 text-red-400 text-sm mb-2">
+              <span className="text-red-400">✕</span> {openaiTestMessage}
+            </p>
+          )}
           <p className="text-slate-500 text-xs">Можно также задать OPENAI_API_KEY в .env (глобально для сервера)</p>
         </div>
 
