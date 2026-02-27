@@ -233,10 +233,14 @@ async def test_external_api(
     result: dict = {"ok": False, "source": src, "message": ""}
     try:
         if src == "fetchserp":
-            from app.services.fetchserp_service import validate_fetchserp_api_key
-            ok, message = await validate_fetchserp_api_key(key)
-            result["ok"] = ok
-            result["message"] = message
+            try:
+                from app.services.fetchserp_service import validate_fetchserp_api_key
+                ok, message = await validate_fetchserp_api_key(key)
+                result["ok"] = ok
+                result["message"] = message
+            except Exception as e:
+                result["ok"] = False
+                result["message"] = str(e)[:200] or "Ошибка проверки ключа"
             return result
         elif src == "newsapi":
             p = await fetch_news_api(country, key)
