@@ -92,6 +92,19 @@ export default function Settings() {
     if (whitelabelData) setWhitelabel(whitelabelData);
   }, [whitelabelData]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gsc = params.get("gsc_token");
+    if (gsc === "ok") {
+      toast.success("Refresh Token получен и сохранён");
+      qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (gsc === "error") {
+      toast.error(params.get("message") || "Не удалось получить Refresh Token");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [qc]);
+
   const saveIntegrationsMut = useMutation({
     mutationFn: (d: IntegrationsData) =>
       api.put("/settings/integrations/all", d).then((r) => r.data),
@@ -630,6 +643,7 @@ export default function Settings() {
           <p className="text-slate-500 text-xs mb-2">
             GSC: <a href="https://search.google.com/search-console" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">search.google.com/search-console</a>. OAuth-ключи: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Google Cloud Console → Credentials</a>.
           </p>
+          <p className="text-slate-500 text-xs mb-2">В Google Console в «Authorized redirect URIs» добавьте: <code className="bg-slate-700 px-1 rounded">{typeof window !== "undefined" ? `${window.location.origin}/api/settings/gsc-oauth-callback` : "https://ваш-домен/api/settings/gsc-oauth-callback"}</code></p>
           <p className="text-slate-500 text-xs mb-4">Для целевой страны в поиске укажите её в GSC → Настройки → International Targeting; регион кампании держите таким же (US, RU и т.д.).</p>
           <div className="space-y-4 mb-4">
             <input
@@ -645,12 +659,37 @@ export default function Settings() {
               type="password"
               className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
-            <input
-              value={integrations.gsc_refresh_token ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, gsc_refresh_token: e.target.value }))}
-              placeholder="Refresh Token"
-              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-            />
+            <div className="flex gap-2 items-center">
+              <input
+                value={integrations.gsc_refresh_token ?? ""}
+                onChange={(e) => setIntegrations((p) => ({ ...p, gsc_refresh_token: e.target.value }))}
+                placeholder="Refresh Token"
+                className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!(integrations.gsc_client_id ?? "").trim() || !(integrations.gsc_client_secret ?? "").trim()) {
+                    toast.error("Сначала введите Client ID и Client Secret и нажмите «Сохранить интеграции», затем получите Refresh Token.");
+                    return;
+                  }
+                  saveIntegrationsMut.mutate(integrations, {
+                    onSuccess: () => {
+                      api.get<{ redirect_url: string }>("/settings/gsc-oauth-start")
+                        .then((r) => {
+                          if (r.data?.redirect_url) window.location.href = r.data.redirect_url;
+                          else toast.error("Не удалось получить ссылку авторизации");
+                        })
+                        .catch((e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"));
+                    },
+                    onError: () => toast.error("Сначала сохраните Client ID и Client Secret"),
+                  });
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-white text-sm whitespace-nowrap"
+              >
+                Получить Refresh Token
+              </button>
+            </div>
           </div>
         </div>
 
