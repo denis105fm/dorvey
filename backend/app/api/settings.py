@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timedelta
 from typing import Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -274,15 +274,26 @@ GSC_SCOPE = "https://www.googleapis.com/auth/indexing"
 
 
 def _gsc_base_url(request: Request) -> str:
-    """Базовый URL для GSC OAuth: PUBLIC_APP_URL, иначе из заголовков прокси, иначе request.base_url."""
+    """Базовый URL для GSC OAuth: PUBLIC_APP_URL, иначе из заголовков прокси, иначе request.base_url.
+    Для не-localhost всегда принудительно https (Google требует HTTPS для redirect_uri)."""
     base = (settings.PUBLIC_APP_URL or "").strip().rstrip("/")
-    if base:
-        return base
-    proto = request.headers.get("X-Forwarded-Proto", "").strip().lower()
-    host = request.headers.get("X-Forwarded-Host", "").strip()
-    if proto and host:
-        return f"{proto}://{host}".rstrip("/")
-    return str(request.base_url).rstrip("/")
+    if not base:
+        proto = request.headers.get("X-Forwarded-Proto", "").strip().lower()
+        host = request.headers.get("X-Forwarded-Host", "").strip()
+        if proto and host:
+            base = f"{proto}://{host}"
+        else:
+            base = str(request.base_url).rstrip("/")
+    base = base.rstrip("/")
+    # Google OAuth требует HTTPS для redirect_uri (кроме localhost)
+    if base.startswith("http://"):
+        try:
+            p = urlparse(base)
+            if p.hostname and p.hostname not in ("localhost", "127.0.0.1"):
+                base = "https://" + (p.netloc or "") + (p.path or "")
+        except Exception:
+            pass
+    return base.rstrip("/") or base
 
 
 @router.get("/gsc-oauth-start")
