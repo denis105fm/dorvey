@@ -100,20 +100,18 @@ async def fetch_keywords_for_keywords(
 
 async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
     """
-    Validate FetchSERP API key by making a minimal request.
-    Returns (ok, message).
+    Проверка ключа через лёгкий эндпоинт GET /api/v1/user (без параметров).
+    Возвращает (ok, message). Не тратит кредиты на keywords_suggestions.
     """
     key = _clean_api_key(api_key or "")
     if not key:
         return False, "Укажите API ключ"
-    url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # По доке FetchSERP: keywords — массив строк (GET ?keywords=seo&country=us)
-    params = [("keywords", "seo"), ("country", "us")]
+    # Лёгкий пинг: только Bearer, без параметров — проверяет ключ и доступ к API
+    url = "https://www.fetchserp.com/api/v1/user"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(
                 url,
-                params=params,
                 headers={
                     "Authorization": f"Bearer {key}",
                     "Accept": "application/json",
@@ -121,6 +119,15 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
                 },
             )
         if r.status_code == 200:
+            try:
+                data = r.json()
+                inner = data.get("data") or {}
+                user = inner.get("user") or {}
+                credits = user.get("api_credit")
+                if credits is not None:
+                    return True, f"Ключ действителен, подключение успешно. Кредитов: {credits}"
+            except Exception:
+                pass
             return True, "Ключ действителен, подключение успешно"
         if r.status_code in (401, 403):
             return False, "Неверный или недействительный ключ"
@@ -132,7 +139,7 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
             err = body or f"HTTP {r.status_code}"
         err = (err or f"Ошибка {r.status_code}").strip()
         if r.status_code >= 500 or (err and err.lower() in ("internal server error", "internal server error.")):
-            return False, f"Сервис FetchSERP вернул ошибку (HTTP {r.status_code}). Ключ передаётся как Bearer. Если ключ скопирован верно из fetchserp.com/app — возможно, запросы с нашего сервера блокируются; напишите в поддержку support@fetchserp.com."
+            return False, f"Сервис FetchSERP вернул ошибку (HTTP {r.status_code}). Если ключ скопирован из fetchserp.com/app — возможно, запросы с нашего сервера блокируются; напишите в support@fetchserp.com."
         return False, f"FetchSERP (HTTP {r.status_code}): {err}"
     except Exception as e:
         msg = str(e).lower()
