@@ -41,7 +41,10 @@ async def fetch_keywords_for_keywords(
         r = await client.get(
             url,
             params=params,
-            headers={"Authorization": f"Bearer {api_key.strip()}"},
+            headers={
+                "Authorization": f"Bearer {api_key.strip()}",
+                "Accept": "application/json",
+            },
         )
     if r.status_code != 200:
         return []
@@ -93,7 +96,10 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
             r = await client.get(
                 url,
                 params=params,
-                headers={"Authorization": f"Bearer {key}"},
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Accept": "application/json",
+                },
             )
         if r.status_code == 200:
             return True, "Ключ действителен, подключение успешно"
