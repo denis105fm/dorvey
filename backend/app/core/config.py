@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     SECRET_KEY: str = "change-me-in-production-use-openssl-rand-hex-32"
     API_PREFIX: str = "/api"
+    # Публичный URL приложения (для OAuth redirect_uri за прокси). Пример: https://app.fortboyard31.ru
+    PUBLIC_APP_URL: str = ""
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://dorvey:dorvey@localhost:5432/dorvey"
