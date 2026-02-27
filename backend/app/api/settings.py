@@ -226,11 +226,35 @@ async def test_external_api(
     country = (data.country or "us").lower()[:2]
     if not key:
         raise HTTPException(400, "Укажите API ключ")
-    allowed = ("newsapi", "gnews", "mediastack", "guardian", "fetchserp")
+    allowed = ("newsapi", "gnews", "mediastack", "guardian", "fetchserp", "bing")
     if src not in allowed:
         raise HTTPException(400, f"Источник должен быть: {', '.join(allowed)}")
 
     result: dict = {"ok": False, "source": src, "message": ""}
+
+    if src == "bing":
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(
+                    "https://ssl.bing.com/webmaster/api.svc/json/GetUserSites",
+                    params={"apikey": key},
+                )
+            if r.status_code != 200:
+                try:
+                    body = r.json()
+                    result["message"] = body.get("Message", body.get("message", r.text[:150]))
+                except Exception:
+                    result["message"] = r.text[:150] or f"HTTP {r.status_code}"
+                return result
+            data = r.json()
+            sites = data.get("d") if isinstance(data.get("d"), list) else []
+            result["ok"] = True
+            result["message"] = f"OK, сайтов в аккаунте: {len(sites)}"
+            result["count"] = len(sites)
+        except Exception as e:
+            result["ok"] = False
+            result["message"] = (str(e)[:200]) or "Ошибка проверки ключа"
+        return result
 
     if src == "fetchserp":
         try:

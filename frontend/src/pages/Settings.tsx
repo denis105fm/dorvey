@@ -77,6 +77,8 @@ export default function Settings() {
   const [openaiTestMessage, setOpenaiTestMessage] = useState("");
   const [fetchserpTestStatus, setFetchserpTestStatus] = useState<null | "checking" | "ok" | "error">(null);
   const [fetchserpTestMessage, setFetchserpTestMessage] = useState("");
+  const [bingTestStatus, setBingTestStatus] = useState<null | "checking" | "ok" | "error">(null);
+  const [bingTestMessage, setBingTestMessage] = useState("");
   const { data: integrationsData } = useQuery({
     queryKey: ["settings", "integrations"],
     queryFn: () => api.get<IntegrationsData>("/settings/integrations/all").then((r) => r.data),
@@ -699,13 +701,59 @@ export default function Settings() {
             <h2 className="text-lg font-medium text-white">Bing Webmaster</h2>
           </div>
           <p className="text-slate-400 text-sm mb-4">API ключ для отправки sitemap в Bing.</p>
-          <p className="text-slate-500 text-xs mb-2">Регистрация: <a href="https://www.bing.com/webmasters" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">bing.com/webmasters</a></p>
-          <input
-            value={integrations.bing_api_key ?? ""}
-            onChange={(e) => setIntegrations((p) => ({ ...p, bing_api_key: e.target.value }))}
-            placeholder="API Key"
-            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 mb-4"
-          />
+          <p className="text-slate-500 text-xs mb-2">Регистрация: <a href="https://www.bing.com/webmasters" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">bing.com/webmasters</a>. Ключ: Настройки → Доступ по API → Ключ API.</p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={integrations.bing_api_key ?? ""}
+              onChange={(e) => {
+                setIntegrations((p) => ({ ...p, bing_api_key: e.target.value }));
+                setBingTestStatus(null);
+              }}
+              placeholder="API Key"
+              className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const key = (integrations.bing_api_key ?? "").trim();
+                if (!key) {
+                  toast.error("Введите API ключ");
+                  return;
+                }
+                setBingTestStatus("checking");
+                api.post("/settings/test-external-api", { source: "bing", api_key: key })
+                  .then((r) => r.data as { ok: boolean; message: string })
+                  .then((data) => {
+                    setBingTestStatus(data.ok ? "ok" : "error");
+                    setBingTestMessage(data.message || "");
+                    toast[data.ok ? "success" : "error"](data.message);
+                  })
+                  .catch((e: { response?: { data?: { detail?: string; message?: string } } }) => {
+                    setBingTestStatus("error");
+                    const msg = e?.response?.data?.message ?? e?.response?.data?.detail;
+                    setBingTestMessage(msg ?? "Ошибка сервера. Попробуйте позже.");
+                    toast.error(msg ?? "Ошибка сервера. Попробуйте позже.");
+                  });
+              }}
+              disabled={bingTestStatus === "checking" || !(integrations.bing_api_key ?? "").trim()}
+              className="px-4 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-1 whitespace-nowrap"
+              title="Проверить ключ и связь с Bing"
+            >
+              <CheckCircle size={16} />
+              {bingTestStatus === "checking" ? "Проверка…" : "Проверить"}
+            </button>
+          </div>
+          {bingTestStatus === "ok" && (
+            <p className="flex items-center gap-2 text-emerald-400 text-sm mt-2">
+              <CheckCircle size={18} /> Ключ действителен, связь с Bing установлена
+            </p>
+          )}
+          {bingTestStatus === "error" && bingTestMessage && (
+            <p className="flex items-center gap-2 text-red-400 text-sm mt-2">
+              <span className="text-red-400">✕</span> {bingTestMessage}
+            </p>
+          )}
         </div>
 
         <div className="card-volumetric">
