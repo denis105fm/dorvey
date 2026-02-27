@@ -351,8 +351,15 @@ var esc2=false;window.addEventListener('scroll',function(){{if(esc2)return;var h
     )
     # Inject Hotjar/Clarity before </head> so they work with any template
     scripts = []
-    if hotjar_site_id and str(hotjar_site_id).strip().isdigit():
-        scripts.append(f'<script>(function(h,o,t,j,a,r){{h.hj=h.hj||function(){{(h.hj.q=h.hj.q||[]).push(arguments)}};h._hjSettings={{hjid:{hotjar_site_id},hjsv:6}};a=o.getElementsByTagName("head")[0];r=o.createElement("script");r.async=1;r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;a.appendChild(r);}})(window,document,"https://static.hotjar.com/c/hotjar-",".js?sv=");</script>')
+    if hotjar_site_id:
+        hid = str(hotjar_site_id).strip()
+        if hid.isdigit():
+            scripts.append(f'<script>(function(h,o,t,j,a,r){{h.hj=h.hj||function(){{(h.hj.q=h.hj.q||[]).push(arguments)}};h._hjSettings={{hjid:{hid},hjsv:6}};a=o.getElementsByTagName("head")[0];r=o.createElement("script");r.async=1;r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;a.appendChild(r);}})(window,document,"https://static.hotjar.com/c/hotjar-",".js?sv=");</script>')
+        else:
+            # Contentsquare (Hotjar evolved) — ID вида 785bcc77e264f
+            cq_id = "".join(c for c in hid if c.isalnum() or c in "-_")
+            if cq_id:
+                scripts.append(f'<script src="https://t.contentsquare.net/uxa/{cq_id}.js"></script>')
     if clarity_project_id:
         cid = "".join(c for c in str(clarity_project_id).strip() if c.isalnum() or c in "-_")
         if cid:

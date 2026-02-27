@@ -276,17 +276,28 @@ async def test_external_api(
 
     if src == "hotjar":
         try:
-            key_clean = "".join(c for c in key if c.isdigit())
-            if not key_clean:
-                result["message"] = "Hotjar Site ID должен быть числом (из hotjar.com)"
+            key_alpha = "".join(c for c in key if c.isalnum() or c in "-_")
+            if not key_alpha:
+                result["message"] = "Введите Hotjar Site ID (число) или Contentsquare ID (например 785bcc77e264f)."
                 return result
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                r = await client.get(f"https://static.hotjar.com/c/hotjar-{key_clean}.js?sv=6")
-            if r.status_code == 200 and (r.text or "").strip():
-                result["ok"] = True
-                result["message"] = "ID верный, скрипт Hotjar доступен"
+            if key_alpha.isdigit():
+                # Классический Hotjar — числовой ID
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    r = await client.get(f"https://static.hotjar.com/c/hotjar-{key_alpha}.js?sv=6")
+                if r.status_code == 200 and (r.text or "").strip():
+                    result["ok"] = True
+                    result["message"] = "ID верный, скрипт Hotjar доступен"
+                else:
+                    result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте Site ID в hotjar.com."
             else:
-                result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте Site ID в hotjar.com."
+                # Contentsquare (Hotjar evolved) — ID вида 785bcc77e264f
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    r = await client.get(f"https://t.contentsquare.net/uxa/{key_alpha}.js")
+                if r.status_code == 200 and (r.text or "").strip():
+                    result["ok"] = True
+                    result["message"] = "ID верный, скрипт Contentsquare (Hotjar) доступен"
+                else:
+                    result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте ID в app.contentsquare.com."
         except Exception as e:
             result["ok"] = False
             result["message"] = (str(e)[:200]) or "Ошибка проверки"
