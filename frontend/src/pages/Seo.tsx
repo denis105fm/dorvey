@@ -58,7 +58,7 @@ export default function Seo() {
       <div className="space-y-6">
         <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
           <h2 className="text-lg font-medium text-white mb-4">GSC Fetch — импорт показов/кликов</h2>
-          <p className="text-slate-400 text-sm mb-3">Загрузить impressions/clicks из Google Search Console в DoorwayMetrics. Нужны GSC credentials в Настройках.</p>
+          <p className="text-slate-400 text-sm mb-3">Загрузить impressions/clicks из Google Search Console в DoorwayMetrics. Нужны GSC credentials в Настройках. Регистрация: <a href="https://search.google.com/search-console" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Search Console</a>, OAuth: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Google Cloud Console</a>.</p>
           <div className="flex gap-4 flex-wrap items-end mb-4">
             <div>
               <label className="block text-slate-400 text-xs mb-1">Домен</label>

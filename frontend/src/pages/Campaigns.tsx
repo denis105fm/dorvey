@@ -445,7 +445,7 @@ export default function Campaigns() {
                   )}
                   <div className="border-t border-slate-600 pt-3 mt-3">
                     <h3 className="text-slate-300 font-medium mb-2">Авто-применение рекомендаций AI</h3>
-                    <p className="text-slate-400 text-xs mb-2">Cron при CR/CTR ниже порога вызывает AI-рекомендации и применяет первую (title/meta/content). Нужен OpenAI в Настройках.</p>
+                    <p className="text-slate-400 text-xs mb-2">Cron при CR/CTR ниже порога вызывает AI-рекомендации и применяет первую (title/meta/content). Нужен OpenAI в Настройках. Ключ: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">platform.openai.com/api-keys</a>.</p>
                     <label className="flex items-center gap-2 text-slate-300 mb-3">
                       <input type="checkbox" checked={rules.auto_apply_recommendations ?? false} onChange={(e) => updateRulesMut.mutate({ auto_apply_recommendations: e.target.checked })} />
                       Включить авто-применение

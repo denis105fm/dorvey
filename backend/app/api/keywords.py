@@ -3,6 +3,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, nulls_last
 
@@ -96,27 +97,38 @@ async def suggest_keywords_from_external(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """Fetch keyword suggestions from DataForSeo by seed + country."""
+    """Fetch keyword suggestions from selected provider (DataForSeo or FetchSERP) by seed + country."""
     ok = await _check_campaign(db, data.campaign_id, current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    from app.services.settings_helpers import get_user_dataforseo_credentials
-    from app.services.dataforseo_service import fetch_keywords_for_keywords
+    from app.services.settings_helpers import get_keyword_provider_credentials
+    from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
+    from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
 
-    creds = await get_user_dataforseo_credentials(db, current_user.id)
+    creds = await get_keyword_provider_credentials(db, current_user.id)
     if not creds:
         raise HTTPException(
             status_code=400,
-            detail="Укажите DataForSeo логин и пароль в Настройках → Интеграции",
+            detail="Выберите провайдера подсказки ключей в Настройках → Интеграции и укажите данные для API (DataForSeo: логин и пароль, FetchSERP: API ключ).",
         )
-    login, password = creds
-    keywords = await fetch_keywords_for_keywords(
-        login, password,
-        seed=data.seed,
-        country=data.country,
-        limit=data.limit,
-    )
-    return KeywordSuggestFromExternalResponse(keywords=keywords, source="dataforseo")
+    provider, c = creds
+    if provider == "dataforseo":
+        keywords = await dataforseo_fetch(
+            c["login"], c["password"],
+            seed=data.seed,
+            country=data.country,
+            limit=data.limit,
+        )
+    elif provider == "fetchserp":
+        keywords = await fetchserp_fetch(
+            c["api_key"],
+            seed=data.seed,
+            country=data.country,
+            limit=data.limit,
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Провайдер «{provider}» не поддерживается.")
+    return KeywordSuggestFromExternalResponse(keywords=keywords, source=provider)
 
 
 @router.post("/suggest-by-offers-geo-batch", response_model=KeywordSuggestFromExternalResponse)
@@ -139,26 +151,33 @@ async def suggest_keywords_by_offers_geo(
     geos = list(dict.fromkeys(row[0] for row in r.all() if row[0]))
     if not geos:
         raise HTTPException(status_code=400, detail="У кампании нет офферов с указанным geo. Добавьте офферы с полем geo.")
-    from app.services.settings_helpers import get_user_dataforseo_credentials
-    from app.services.dataforseo_service import fetch_keywords_for_keywords
+    from app.services.settings_helpers import get_keyword_provider_credentials
+    from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
+    from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
 
-    creds = await get_user_dataforseo_credentials(db, current_user.id)
+    creds = await get_keyword_provider_credentials(db, current_user.id)
     if not creds:
-        raise HTTPException(status_code=400, detail="Укажите DataForSeo в Настройках → Интеграции")
-    login, password = creds
+        raise HTTPException(status_code=400, detail="Выберите провайдера подсказки ключей в Настройках и укажите данные для API.")
+    provider, c = creds
+    fetch_fn = dataforseo_fetch if provider == "dataforseo" else fetchserp_fetch
+    if provider == "dataforseo":
+        auth = (c["login"], c["password"])
+    else:
+        auth = c["api_key"]
     merged: dict[str, dict] = {}
     limit_per_geo = max(20, data.limit // len(geos))
     for country in geos[:5]:
-        kws = await fetch_keywords_for_keywords(
-            login, password, seed=data.seed, country=country, limit=limit_per_geo
-        )
+        if provider == "dataforseo":
+            kws = await fetch_fn(auth[0], auth[1], seed=data.seed, country=country, limit=limit_per_geo)
+        else:
+            kws = await fetch_fn(auth, seed=data.seed, country=country, limit=limit_per_geo)
         for kw in kws:
             key_lower = kw["keyword"].lower()
             if key_lower not in merged or (kw.get("volume", 0) or 0) > (merged[key_lower].get("volume") or 0):
                 merged[key_lower] = {**kw, "region": country}
     result = sorted(merged.values(), key=lambda x: -(x.get("volume") or 0))[:data.limit]
     out = [{"keyword": x["keyword"], "volume": x.get("volume", 0), "cpc": x.get("cpc", 0)} for x in result]
-    return KeywordSuggestFromExternalResponse(keywords=out, source="dataforseo")
+    return KeywordSuggestFromExternalResponse(keywords=out, source=provider)
 
 
 @router.get("/suggest-by-offers-geo")
@@ -198,12 +217,13 @@ async def bulk_import_from_suggest(
     for item in data.items:
         if item.keyword.strip().lower() in existing_lower:
             continue
+        source_val = (data.source or "dataforseo").strip() or "dataforseo"
         k = Keyword(
             campaign_id=data.campaign_id,
             keyword=item.keyword.strip(),
             volume=item.volume,
             region=data.region,
-            source="dataforseo",
+            source=source_val,
         )
         db.add(k)
         await db.flush()
@@ -232,3 +252,146 @@ async def delete_keyword(
     await db.delete(k)
     await db.commit()
     return None
+
+
+# --- Стартовый набор ниш и авто-подсказки ---
+
+@router.get("/startup-niches")
+async def get_startup_niches(current_user: CurrentUser):
+    """Справочник ниш для стартового набора ключей (seed-фразы для провайдера)."""
+    from app.services.startup_niches import STARTUP_NICHES
+    return {"niches": [{"id": n["id"], "name": n["name"], "seeds": n["seeds"]} for n in STARTUP_NICHES]}
+
+
+class StartupKeywordsRequest(BaseModel):
+    seeds: List[str]  # ниши/фразы для запроса к провайдеру
+    country: str = "RU"
+    limit_per_seed: int = 30
+    campaign_id: int | None = None
+    auto_import: bool = False
+
+
+@router.post("/startup-keywords")
+async def fetch_startup_keywords(
+    data: StartupKeywordsRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Запрос к провайдеру по списку ниш/фраз → топ ключей по объёму.
+    Если auto_import=True и campaign_id задан — импорт в кампанию.
+    """
+    from app.services.settings_helpers import get_keyword_provider_credentials
+    from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
+    from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
+
+    creds = await get_keyword_provider_credentials(db, current_user.id)
+    if not creds:
+        raise HTTPException(
+            status_code=400,
+            detail="Выберите провайдера подсказки ключей в Настройках и укажите API данные.",
+        )
+    provider, c = creds
+    fetch_fn = dataforseo_fetch if provider == "dataforseo" else fetchserp_fetch
+    if provider == "dataforseo":
+        auth = (c["login"], c["password"])
+    else:
+        auth = c["api_key"]
+
+    merged: dict[str, dict] = {}
+    for seed in (data.seeds or [])[:10]:
+        seed = (seed or "").strip()
+        if not seed:
+            continue
+        if provider == "dataforseo":
+            kws = await fetch_fn(auth[0], auth[1], seed=seed, country=data.country, limit=data.limit_per_seed)
+        else:
+            kws = await fetch_fn(auth, seed=seed, country=data.country, limit=data.limit_per_seed)
+        for kw in kws:
+            key_lower = kw["keyword"].lower()
+            if key_lower not in merged or (kw.get("volume") or 0) > (merged[key_lower].get("volume") or 0):
+                merged[key_lower] = kw
+    result = sorted(merged.values(), key=lambda x: -(x.get("volume") or 0))
+    keywords = [{"keyword": x["keyword"], "volume": x.get("volume", 0), "cpc": x.get("cpc", 0)} for x in result]
+
+    imported = 0
+    if data.auto_import and data.campaign_id and keywords:
+        ok = await _check_campaign(db, data.campaign_id, current_user.id)
+        if ok:
+            existing_r = await db.execute(select(Keyword.keyword).where(Keyword.campaign_id == data.campaign_id))
+            existing_lower = {row[0].lower() for row in existing_r.all() if row[0]}
+            for item in keywords[:200]:
+                if item["keyword"].strip().lower() in existing_lower:
+                    continue
+                k = Keyword(
+                    campaign_id=data.campaign_id,
+                    keyword=item["keyword"].strip(),
+                    volume=item.get("volume", 0),
+                    region=data.country,
+                    source=provider,
+                )
+                db.add(k)
+                await db.flush()
+                imported += 1
+                existing_lower.add(item["keyword"].strip().lower())
+            await db.commit()
+
+    return {"keywords": keywords, "source": provider, "imported": imported}
+
+
+class AutoPullImportRequest(BaseModel):
+    campaign_id: int
+    seed: str
+    country: str = "RU"
+    limit: int = 50
+
+
+@router.post("/auto-pull-and-import")
+async def auto_pull_and_import(
+    data: AutoPullImportRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Полная автоматизация подсказок: подтянуть ключи из выбранного провайдера и сразу импортировать в кампанию (без ручного выбора).
+    """
+    ok = await _check_campaign(db, data.campaign_id, current_user.id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    from app.services.settings_helpers import get_keyword_provider_credentials
+    from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
+    from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
+
+    creds = await get_keyword_provider_credentials(db, current_user.id)
+    if not creds:
+        raise HTTPException(status_code=400, detail="Настройте провайдера подсказки ключей в Настройках.")
+    provider, c = creds
+    if provider == "dataforseo":
+        keywords = await dataforseo_fetch(
+            c["login"], c["password"],
+            seed=data.seed, country=data.country, limit=data.limit,
+        )
+    else:
+        keywords = await fetchserp_fetch(c["api_key"], seed=data.seed, country=data.country, limit=data.limit)
+
+    existing_r = await db.execute(select(Keyword.keyword).where(Keyword.campaign_id == data.campaign_id))
+    existing_lower = {row[0].lower() for row in existing_r.all() if row[0]}
+    created = []
+    for item in keywords:
+        if item["keyword"].strip().lower() in existing_lower:
+            continue
+        k = Keyword(
+            campaign_id=data.campaign_id,
+            keyword=item["keyword"].strip(),
+            volume=item.get("volume", 0),
+            region=data.country,
+            source=provider,
+        )
+        db.add(k)
+        await db.flush()
+        created.append(k)
+        existing_lower.add(item["keyword"].strip().lower())
+    await db.commit()
+    for k in created:
+        await db.refresh(k)
+    return {"imported": len(created), "source": provider, "keywords": [{"keyword": k.keyword, "volume": k.volume} for k in created]}

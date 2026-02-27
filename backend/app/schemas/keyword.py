@@ -48,6 +48,7 @@ class KeywordBulkImportFromSuggest(BaseModel):
     campaign_id: int
     items: list[KeywordSuggestItem]
     region: Optional[str] = None
+    source: Optional[str] = None  # dataforseo | fetchserp — сохраняется в Keyword.source
 
 
 class KeywordResponse(KeywordBase):

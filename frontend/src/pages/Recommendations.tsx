@@ -109,7 +109,7 @@ export default function Recommendations() {
 
       {list.length > 0 && (
         <p className="text-slate-500 text-xs mt-4">
-          Включите «Внешние данные» в Настройках и укажите хотя бы один источник (NewsAPI, GNews, Mediastack, Guardian). REST Countries подключается автоматически.
+          Включите «Внешние данные» в Настройках и укажите хотя бы один источник. Регистрация: <a href="https://newsapi.org/register" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">NewsAPI</a>, <a href="https://gnews.io/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">GNews</a>, <a href="https://mediastack.com/signup" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Mediastack</a>, <a href="https://open-platform.theguardian.com/access/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Guardian</a>. REST Countries подключается автоматически.
         </p>
       )}
     </div>

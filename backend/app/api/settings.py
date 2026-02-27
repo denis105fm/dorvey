@@ -44,6 +44,8 @@ INTEGRATION_KEYS = [
     "seasonality_data_url",
     "dataforseo_login",
     "dataforseo_password",
+    "keyword_provider",
+    "fetchserp_api_key",
 ]
 
 BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled", "external_data_enabled"}
@@ -93,6 +95,8 @@ class IntegrationsSettings(BaseModel):
     seasonality_data_url: Optional[str] = None
     dataforseo_login: Optional[str] = None
     dataforseo_password: Optional[str] = None
+    keyword_provider: Optional[str] = None  # dataforseo | fetchserp
+    fetchserp_api_key: Optional[str] = None
 
 
 @router.get("/integrations/all")
