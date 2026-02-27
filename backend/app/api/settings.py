@@ -226,7 +226,7 @@ async def test_external_api(
     country = (data.country or "us").lower()[:2]
     if not key:
         raise HTTPException(400, "Укажите API ключ")
-    allowed = ("newsapi", "gnews", "mediastack", "guardian", "fetchserp", "bing")
+    allowed = ("newsapi", "gnews", "mediastack", "guardian", "fetchserp", "bing", "clarity", "hotjar")
     if src not in allowed:
         raise HTTPException(400, f"Источник должен быть: {', '.join(allowed)}")
 
@@ -254,6 +254,42 @@ async def test_external_api(
         except Exception as e:
             result["ok"] = False
             result["message"] = (str(e)[:200]) or "Ошибка проверки ключа"
+        return result
+
+    if src == "clarity":
+        try:
+            cid = "".join(c for c in key if c.isalnum() or c in "-_")
+            if not cid:
+                result["message"] = "Введите Project ID (латиница, цифры)"
+                return result
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                r = await client.get(f"https://www.clarity.ms/tag/{cid}")
+            if r.status_code == 200 and (r.text or "").strip():
+                result["ok"] = True
+                result["message"] = "ID верный, скрипт Clarity доступен"
+            else:
+                result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте Project ID в clarity.microsoft.com."
+        except Exception as e:
+            result["ok"] = False
+            result["message"] = (str(e)[:200]) or "Ошибка проверки"
+        return result
+
+    if src == "hotjar":
+        try:
+            key_clean = "".join(c for c in key if c.isdigit())
+            if not key_clean:
+                result["message"] = "Hotjar Site ID должен быть числом (из hotjar.com)"
+                return result
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                r = await client.get(f"https://static.hotjar.com/c/hotjar-{key_clean}.js?sv=6")
+            if r.status_code == 200 and (r.text or "").strip():
+                result["ok"] = True
+                result["message"] = "ID верный, скрипт Hotjar доступен"
+            else:
+                result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте Site ID в hotjar.com."
+        except Exception as e:
+            result["ok"] = False
+            result["message"] = (str(e)[:200]) or "Ошибка проверки"
         return result
 
     if src == "fetchserp":
