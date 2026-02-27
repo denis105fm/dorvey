@@ -18,6 +18,14 @@ def _country_code(country: str) -> str:
     return COUNTRY_TO_FETCHSERP.get(c, "us")
 
 
+def _clean_api_key(raw: str) -> str:
+    """Убираем пробелы и невидимые символы при вставке из буфера."""
+    if not raw:
+        return ""
+    s = raw.strip()
+    return "".join(c for c in s if ord(c) >= 32 and ord(c) != 127 and c not in "\n\r\t")
+
+
 async def fetch_keywords_for_keywords(
     api_key: str,
     *,
@@ -31,6 +39,9 @@ async def fetch_keywords_for_keywords(
     """
     if not (api_key or "").strip():
         return []
+    key_clean = _clean_api_key(api_key) or (api_key or "").strip()
+    if not key_clean:
+        return []
     seed_clean = (seed or "").strip()[:200]
     if not seed_clean:
         return []
@@ -43,8 +54,9 @@ async def fetch_keywords_for_keywords(
             url,
             params=params,
             headers={
-                "Authorization": f"Bearer {api_key.strip()}",
+                "Authorization": f"Bearer {key_clean}",
                 "Accept": "application/json",
+                "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
             },
         )
     if r.status_code != 200:
@@ -91,12 +103,12 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
     Validate FetchSERP API key by making a minimal request.
     Returns (ok, message).
     """
-    key = (api_key or "").strip()
+    key = _clean_api_key(api_key or "")
     if not key:
         return False, "Укажите API ключ"
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # По доке FetchSERP: keywords — массив строк (GET ?keywords=test&country=us)
-    params = [("keywords", "test"), ("country", "us")]
+    # По доке FetchSERP: keywords — массив строк (GET ?keywords=seo&country=us)
+    params = [("keywords", "seo"), ("country", "us")]
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(
@@ -105,6 +117,7 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
                 headers={
                     "Authorization": f"Bearer {key}",
                     "Accept": "application/json",
+                    "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
                 },
             )
         if r.status_code == 200:
@@ -119,7 +132,7 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
             err = body or f"HTTP {r.status_code}"
         err = (err or f"Ошибка {r.status_code}").strip()
         if r.status_code >= 500 or (err and err.lower() in ("internal server error", "internal server error.")):
-            return False, f"Сервис FetchSERP вернул ошибку (HTTP {r.status_code}). Скопируйте ключ заново из fetchserp.com/app (без пробелов) и нажмите «Проверить» снова. Если не поможет — попробуйте позже."
+            return False, f"Сервис FetchSERP вернул ошибку (HTTP {r.status_code}). Ключ передаётся как Bearer. Если ключ скопирован верно из fetchserp.com/app — возможно, запросы с нашего сервера блокируются; напишите в поддержку support@fetchserp.com."
         return False, f"FetchSERP (HTTP {r.status_code}): {err}"
     except Exception as e:
         msg = str(e).lower()
