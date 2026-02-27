@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timedelta
 from typing import Any, Optional
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -258,12 +258,14 @@ async def test_external_api(
 
     if src == "clarity":
         try:
-            cid = "".join(c for c in key if c.isalnum() or c in "-_")
+            # Clarity ID может содержать @ (например vo4y@wsy3s)
+            cid = "".join(c for c in key if c.isalnum() or c in "-_@")
             if not cid:
-                result["message"] = "Введите Project ID (латиница, цифры)"
+                result["message"] = "Введите Project ID (из clarity.microsoft.com)"
                 return result
+            url_encoded_id = quote(cid, safe="")
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                r = await client.get(f"https://www.clarity.ms/tag/{cid}")
+                r = await client.get(f"https://www.clarity.ms/tag/{url_encoded_id}")
             if r.status_code == 200 and (r.text or "").strip():
                 result["ok"] = True
                 result["message"] = "ID верный, скрипт Clarity доступен"
