@@ -264,13 +264,22 @@ async def test_external_api(
                 result["message"] = "Введите Project ID (из clarity.microsoft.com)"
                 return result
             url_encoded_id = quote(cid, safe="")
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"}
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                r = await client.get(f"https://www.clarity.ms/tag/{url_encoded_id}")
+                r = await client.get(f"https://www.clarity.ms/tag/{url_encoded_id}", headers=headers)
             if r.status_code == 200 and (r.text or "").strip():
                 result["ok"] = True
                 result["message"] = "ID верный, скрипт Clarity доступен"
+            elif r.status_code in (200, 204) and cid:
+                # 204 или пустой ответ — сервер иногда не отдаёт скрипт на проверку; ID сохраняем
+                result["ok"] = True
+                result["message"] = "ID принят. После деплоя проверьте запись сессий в clarity.microsoft.com."
+            elif r.status_code == 400 and "@" in cid:
+                # Для ID с @ сервер может возвращать 400 при запросе с бэкенда; в браузере на сайте скрипт может грузиться
+                result["ok"] = True
+                result["message"] = "ID принят (проверка с сервера недоступна для этого формата). Сохраните и задеплойте — скрипт подставится в страницы."
             else:
-                result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте Project ID в clarity.microsoft.com."
+                result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте Project ID в Параметры → Обзор на clarity.microsoft.com."
         except Exception as e:
             result["ok"] = False
             result["message"] = (str(e)[:200]) or "Ошибка проверки"
