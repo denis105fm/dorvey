@@ -290,14 +290,16 @@ async def test_external_api(
                 else:
                     result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте Site ID в hotjar.com."
             else:
-                # Contentsquare (Hotjar evolved) — ID вида 785bcc77e264f
+                # Contentsquare (Hotjar evolved) — ID вида 785bcc77e264f (12 символов)
+                # Сервер может отдавать 200 и для неверного ID — проверяем длину и содержание
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                     r = await client.get(f"https://t.contentsquare.net/uxa/{key_alpha}.js")
-                if r.status_code == 200 and (r.text or "").strip():
+                body = (r.text or "").strip()
+                if r.status_code == 200 and len(body) > 2000 and ("contentsquare" in body.lower() or "csq" in body.lower() or "uxa" in body.lower()):
                     result["ok"] = True
                     result["message"] = "ID верный, скрипт Contentsquare (Hotjar) доступен"
                 else:
-                    result["message"] = f"Скрипт не найден (HTTP {r.status_code}). Проверьте ID в app.contentsquare.com."
+                    result["message"] = "Скрипт не найден или неверный ID. Убедитесь, что скопировали полный ID из app.contentsquare.com (например 785bcc77e264f)."
         except Exception as e:
             result["ok"] = False
             result["message"] = (str(e)[:200]) or "Ошибка проверки"
