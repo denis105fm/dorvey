@@ -831,7 +831,7 @@ export default function Settings() {
                   setIntegrations((p) => ({ ...p, hotjar_site_id: e.target.value }));
                   setHotjarTestStatus(null);
                 }}
-                placeholder="Hotjar Site ID (число)"
+                placeholder="Hotjar или Contentsquare ID (число или 785bcc77e264f)"
                 className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
               <button
