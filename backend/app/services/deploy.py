@@ -20,6 +20,43 @@ from app.models.setting import Setting
 from app.services.template_engine import render_doorway_page
 
 
+def test_ssh_connection(
+    host: str,
+    port: int,
+    user: str,
+    auth_type: str,
+    auth_data: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Test SSH connection with given params. Returns (success, message)."""
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        connect_kw = {
+            "hostname": host,
+            "port": port or 22,
+            "username": user,
+        }
+        if auth_type == "password":
+            connect_kw["password"] = auth_data or ""
+        else:
+            key = auth_data
+            if key and "\n" in key:
+                pkey = paramiko.RSAKey.from_private_key(io.StringIO(key))
+            elif key:
+                pkey = paramiko.RSAKey.from_private_key_file(key)
+            else:
+                pkey = None
+            if pkey:
+                connect_kw["pkey"] = pkey
+            elif auth_type == "password":
+                connect_kw["password"] = ""
+        client.connect(**connect_kw, timeout=10)
+        client.close()
+        return True, "Подключение успешно"
+    except Exception as e:
+        return False, str(e)
+
+
 def _get_ssh_client(server: Server) -> paramiko.SSHClient:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())

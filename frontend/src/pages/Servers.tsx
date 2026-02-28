@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Server as ServerIcon } from "lucide-react";
+import { toast } from "sonner";
 
 type Server = { id: number; name: string; host: string; port: number; user: string; auth_type?: string; path?: string; ssl_auto?: boolean };
 
@@ -26,6 +27,16 @@ export default function Servers() {
   const deleteMut = useMutation({
     mutationFn: (id: number) => api.delete(`/servers/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["servers"] }),
+  });
+  const testConnMut = useMutation({
+    mutationFn: (d: { host: string; port: number; user: string; auth_type: string; auth_data: string }) =>
+      api.post("/servers/test-connection", d).then((r) => r.data),
+    onSuccess: (data: { ok: boolean; message: string }) => {
+      toast[data.ok ? "success" : "error"](data.message);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => {
+      toast.error(e?.response?.data?.detail ?? "Ошибка проверки");
+    },
   });
 
   const openEdit = (s: Server) => {
@@ -106,7 +117,15 @@ export default function Servers() {
               <input value={form.auth_data} onChange={(e) => setForm((f) => ({ ...f, auth_data: e.target.value }))} placeholder={form.auth_type === "password" ? "Пароль" : "Ключ (опц.)"} type={form.auth_type === "password" ? "password" : "text"} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={form.ssl_auto} onChange={(e) => setForm((f) => ({ ...f, ssl_auto: e.target.checked }))} />Авто SSL</label>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex justify-end gap-2 mt-4 flex-wrap">
+              <button
+                type="button"
+                onClick={() => testConnMut.mutate({ host: form.host, port: form.port, user: form.user, auth_type: form.auth_type, auth_data: form.auth_data })}
+                disabled={!form.host || !form.user || testConnMut.isPending}
+                className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 rounded-lg text-white"
+              >
+                {testConnMut.isPending ? "Проверка…" : "Проверить подключение"}
+              </button>
               <button onClick={() => { setModal(null); setEdit(null); }} className="px-4 py-2 bg-slate-600 rounded-lg text-white">Отмена</button>
               <button onClick={() => modal === "create" ? createMut.mutate(form) : edit && updateMut.mutate({ id: edit.id, data: form })} disabled={!form.name || !form.host || !form.user || createMut.isPending || updateMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white">Сохранить</button>
             </div>

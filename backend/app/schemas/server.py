@@ -39,3 +39,12 @@ class ServerResponse(ServerBase):
     class Config:
         from_attributes = True
         # Exclude auth_data from response for security
+
+
+class ServerTestConnection(BaseModel):
+    """Payload for testing SSH connection (without saving server)."""
+    host: str
+    port: int = 22
+    user: str
+    auth_type: str = "ssh_key"
+    auth_data: Optional[str] = None
