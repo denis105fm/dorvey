@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import api from "../api/client";
 
 /** Разбивает распознанный текст страницы оффера на Description / Restrictions / Our recommendations */
@@ -49,6 +50,9 @@ export default function Offers() {
   const [ocrStatus, setOcrStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [ocrProgress, setOcrProgress] = useState(0);
   const ocrInputRef = useRef<HTMLInputElement>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  useEffect(() => { setSelectedIds([]); }, [campaignId]);
 
   const { data: offers, isLoading } = useQuery({
     queryKey: ["offers", campaignId],
@@ -76,6 +80,20 @@ export default function Offers() {
   const deleteMut = useMutation({
     mutationFn: (id: number) => api.delete(`/offers/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["offers", campaignId] }),
+  });
+  const bulkDeleteMut = useMutation({
+    mutationFn: async (ids: number[]) => {
+      await Promise.all(ids.map((id) => api.delete(`/offers/${id}`)));
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      qc.invalidateQueries({ queryKey: ["offers", campaignId] });
+      setSelectedIds([]);
+      toast.success(`Удалено офферов: ${count}`);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => {
+      toast.error(e?.response?.data?.detail ?? "Ошибка удаления");
+    },
   });
   const importMut = useMutation({
     mutationFn: async () => {
@@ -166,9 +184,34 @@ export default function Offers() {
       ) : (
         <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden">
           {offers?.length ? (
+            <>
+              {selectedIds.length > 0 && (
+                <div className="px-4 py-2 bg-slate-700/50 border-b border-slate-700 flex items-center gap-3">
+                  <span className="text-slate-300 text-sm">Выбрано: {selectedIds.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Удалить выбранные офферы (${selectedIds.length})?`)) bulkDeleteMut.mutate([...selectedIds]);
+                    }}
+                    disabled={bulkDeleteMut.isPending}
+                    className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded-lg text-white text-sm"
+                  >
+                    {bulkDeleteMut.isPending ? "Удаление…" : "Удалить выбранные"}
+                  </button>
+                  <button type="button" onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white text-sm">Снять выделение</button>
+                </div>
+              )}
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-700">
+                  <th className="text-left px-4 py-3 text-slate-400 font-medium w-10">
+                    <input
+                      type="checkbox"
+                      checked={offers.length > 0 && selectedIds.length === offers.length}
+                      onChange={(e) => setSelectedIds(e.target.checked ? offers.map((o: Offer) => o.id) : [])}
+                      className="rounded border-slate-500 bg-slate-700 text-emerald-500 focus:ring-emerald-500"
+                    />
+                  </th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">ID</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Название</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Ставка</th>
@@ -186,6 +229,14 @@ export default function Offers() {
               <tbody>
                 {offers.map((o: Offer) => (
                   <tr key={o.id} className="border-b border-slate-700/50">
+                    <td className="px-4 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(o.id)}
+                        onChange={() => setSelectedIds((prev) => (prev.includes(o.id) ? prev.filter((id) => id !== o.id) : [...prev, o.id]))}
+                        className="rounded border-slate-500 bg-slate-700 text-emerald-500 focus:ring-emerald-500"
+                      />
+                    </td>
                     <td className="px-4 py-3 text-white">{o.id}</td>
                     <td className="px-4 py-3 text-slate-300">{o.name ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-400">{o.rate ?? "—"}</td>
@@ -209,6 +260,7 @@ export default function Offers() {
                 ))}
               </tbody>
             </table>
+            </>
           ) : (
             <div className="p-8 text-center text-slate-400">Нет офферов для этой кампании</div>
           )}
