@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
@@ -214,9 +215,9 @@ export default function Offers() {
         </div>
       )}
 
-      {modal === "import" && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setModal(null)}>
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4" onClick={(e) => e.stopPropagation()}>
+      {modal === "import" && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4" onClick={() => setModal(null)}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-medium text-white mb-4">Импорт из Zeydoo CSV</h2>
             <p className="text-slate-400 text-sm mb-4">Выгрузите оффер в Zeydoo (Export to CSV) и укажите трекинг-ссылку этого оффера — по каждой строке (гео) будет создан оффер в выбранной кампании.</p>
             <div className="space-y-3">
@@ -231,14 +232,15 @@ export default function Offers() {
               <button onClick={() => importMut.mutate()} disabled={!importUrl.trim() || !importFile || importMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white">Импортировать</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {modal && modal !== "import" && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 overflow-y-auto py-4" onClick={() => { setModal(null); setEdit(null); }}>
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 my-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-medium text-white mb-4">{modal === "create" ? "Новый оффер" : "Редактировать оффер"}</h2>
-            <div className="space-y-3">
+      {modal && modal !== "import" && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4" onClick={() => { setModal(null); setEdit(null); }}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full max-h-[90vh] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-4 shrink-0">{modal === "create" ? "Новый оффер" : "Редактировать оффер"}</h2>
+            <div className="space-y-3 overflow-y-auto min-h-0">
               <input value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} placeholder="URL оффера (https://...)" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Название (для таблицы сравнения)" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <div className="grid grid-cols-3 gap-2">
@@ -275,12 +277,13 @@ export default function Offers() {
                 <textarea value={form.recommendations} onChange={(e) => setForm((f) => ({ ...f, recommendations: e.target.value }))} placeholder="Текст из блока Our recommendations..." rows={2} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 text-sm resize-y" />
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="flex justify-end gap-2 mt-4 shrink-0">
               <button onClick={() => { setModal(null); setEdit(null); }} className="px-4 py-2 bg-slate-600 rounded-lg text-white">Отмена</button>
               <button onClick={() => modal === "create" ? createMut.mutate({ ...form, campaign_id: campaignId }) : edit && updateMut.mutate({ id: edit.id, data: form })} disabled={!form.url || createMut.isPending || updateMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white">Сохранить</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
