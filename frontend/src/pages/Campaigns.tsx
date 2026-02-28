@@ -513,10 +513,10 @@ export default function Campaigns() {
       )}
 
       {modal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { setModal(null); setEdit(null); }}>
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-medium text-white mb-4 shrink-0">{modal === "create" ? "Новая кампания" : "Редактировать кампанию"}</h2>
-            <div className="space-y-3 overflow-y-auto min-h-0">
+        <div className="fixed inset-0 bg-black/60 z-50 overflow-y-auto py-6 flex justify-center" onClick={() => { setModal(null); setEdit(null); }}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4 my-auto min-h-0" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-4">{modal === "create" ? "Новая кампания" : "Редактировать кампанию"}</h2>
+            <div className="space-y-3">
               <div>
                 <label className="block text-slate-400 text-sm mb-1">Название <span className="text-amber-400">*</span></label>
                 <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Например: Click Box US" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
@@ -553,7 +553,7 @@ export default function Campaigns() {
                 <option value="paused">paused</option>
               </select>
             </div>
-            <div className="flex justify-end gap-2 mt-4 shrink-0">
+            <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => { setModal(null); setEdit(null); }} className="px-4 py-2 bg-slate-600 rounded-lg text-white">Отмена</button>
               <button onClick={() => modal === "create" ? createMut.mutate(form) : edit && updateMut.mutate({ id: edit.id, data: form })} disabled={!form.name || createMut.isPending || updateMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white">Сохранить</button>
             </div>
