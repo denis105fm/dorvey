@@ -14,6 +14,20 @@ type Campaign = {
   status: string;
 };
 
+const COUNTRY_PRESETS: Record<string, { language: string; locale: string; region: string; currency: string }> = {
+  RU: { language: "ru", locale: "ru-RU", region: "RU", currency: "RUB" },
+  US: { language: "en", locale: "en-US", region: "US", currency: "USD" },
+  KZ: { language: "ru", locale: "kk-KZ", region: "KZ", currency: "KZT" },
+  BY: { language: "ru", locale: "be-BY", region: "BY", currency: "BYN" },
+  UA: { language: "uk", locale: "uk-UA", region: "UA", currency: "UAH" },
+  DE: { language: "de", locale: "de-DE", region: "DE", currency: "EUR" },
+  GB: { language: "en", locale: "en-GB", region: "GB", currency: "GBP" },
+  PL: { language: "pl", locale: "pl-PL", region: "PL", currency: "PLN" },
+  FR: { language: "fr", locale: "fr-FR", region: "FR", currency: "EUR" },
+  ES: { language: "es", locale: "es-ES", region: "ES", currency: "EUR" },
+  IT: { language: "it", locale: "it-IT", region: "IT", currency: "EUR" },
+};
+
 export default function Campaigns() {
   const qc = useQueryClient();
   const [abCampaignId, setAbCampaignId] = useState<number | null>(null);
@@ -505,6 +519,22 @@ export default function Campaigns() {
             <div className="space-y-3">
               <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Название" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <input value={form.affiliate_url} onChange={(e) => setForm((f) => ({ ...f, affiliate_url: e.target.value }))} placeholder="Affiliate URL" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Страна / регион</label>
+                <select
+                  value={Object.keys(COUNTRY_PRESETS).find((k) => COUNTRY_PRESETS[k].region === form.region && COUNTRY_PRESETS[k].locale === form.locale) ?? ""}
+                  onChange={(e) => {
+                    const key = e.target.value as keyof typeof COUNTRY_PRESETS;
+                    if (key && COUNTRY_PRESETS[key]) setForm((f) => ({ ...f, ...COUNTRY_PRESETS[key] }));
+                  }}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
+                >
+                  <option value="">— свои значения</option>
+                  {Object.entries(COUNTRY_PRESETS).map(([code, p]) => (
+                    <option key={code} value={code}>{p.region} — {p.language}, {p.currency}</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <input value={form.language} onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))} placeholder="Язык" className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                 <input value={form.region} onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))} placeholder="Регион" className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
