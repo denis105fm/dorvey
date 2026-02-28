@@ -9,9 +9,26 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser
 from app.core.database import get_db
 from app.models.server import Server
-from app.schemas.server import ServerCreate, ServerUpdate, ServerResponse
+from app.schemas.server import ServerCreate, ServerUpdate, ServerResponse, ServerTestConnection
+from app.services.deploy import test_ssh_connection
 
 router = APIRouter()
+
+
+@router.post("/test-connection")
+async def test_server_connection(
+    data: ServerTestConnection,
+    current_user: CurrentUser,
+):
+    """Test SSH connection with given params. Returns { ok: bool, message: str }."""
+    ok, message = test_ssh_connection(
+        host=data.host,
+        port=data.port,
+        user=data.user,
+        auth_type=data.auth_type,
+        auth_data=data.auth_data,
+    )
+    return {"ok": ok, "message": message}
 
 
 @router.get("/", response_model=List[ServerResponse])
