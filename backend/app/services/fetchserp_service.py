@@ -47,8 +47,13 @@ async def fetch_keywords_for_keywords(
         return []
     cc = _country_code(country)
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # По доке: keywords — массив строк; передаём как keywords=seed
-    params = [("keywords", seed_clean), ("country", cc)]
+    # API ждёт массив keywords: передаём каждую seed-фразу отдельно (через запятую в seed)
+    seed_parts = [s.strip() for s in seed_clean.split(",") if s.strip()]
+    if not seed_parts:
+        seed_parts = [seed_clean]
+    params = [("country", cc)]
+    for kw in seed_parts[:10]:
+        params.append(("keywords", kw))
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
             url,

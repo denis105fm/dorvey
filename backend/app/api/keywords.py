@@ -394,4 +394,9 @@ async def auto_pull_and_import(
     await db.commit()
     for k in created:
         await db.refresh(k)
-    return {"imported": len(created), "source": provider, "keywords": [{"keyword": k.keyword, "volume": k.volume} for k in created]}
+    result = {"imported": len(created), "source": provider, "keywords": [{"keyword": k.keyword, "volume": k.volume} for k in created]}
+    if len(created) == 0 and not keywords:
+        result["hint"] = "Провайдер вернул 0 ключей. Проверьте Настройки → Интеграции (API ключ FetchSERP), попробуйте одну чёткую seed-фразу на английском, например: casual clicker game"
+    elif len(created) == 0 and keywords:
+        result["hint"] = "Все подтянутые ключи уже есть в кампании."
+    return result
