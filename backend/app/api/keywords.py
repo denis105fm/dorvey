@@ -400,6 +400,10 @@ async def auto_pull_and_import(
         result["hint"] = "Провайдер вернул 0 ключей. Проверьте Настройки → Интеграции (API ключ FetchSERP), попробуйте одну чёткую seed-фразу на английском, например: casual clicker game"
         if provider == "fetchserp" and fetchserp_debug:
             result["debug"] = fetchserp_debug
+            if fetchserp_debug.get("http_status") not in (None, 200):
+                err = fetchserp_debug.get("api_error") or fetchserp_debug.get("response_preview", "")[:200]
+                if err:
+                    result["hint"] += f" Ошибка API (HTTP {fetchserp_debug.get('http_status')}): {err}"
     elif len(created) == 0 and keywords:
         result["hint"] = "Все подтянутые ключи уже есть в кампании."
     return result

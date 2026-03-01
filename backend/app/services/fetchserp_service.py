@@ -51,7 +51,7 @@ async def fetch_keywords_for_keywords(
         return [], None
     cc = _country_code(country)
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # Параметр keywords (повторяемый): keywords=phrase1&keywords=phrase2. Короткие части (<2 символов) не отправляем.
+    # По доке: keywords — array, style form. В Rails GET-массивы передаются как keywords[]=val1&keywords[]=val2
     seed_parts = [s.strip() for s in seed_clean.split(",") if len(s.strip()) >= 2]
     if not seed_parts:
         seed_parts = [seed_clean] if len(seed_clean) >= 2 else []
@@ -59,7 +59,7 @@ async def fetch_keywords_for_keywords(
         return [], None
     params = [("country", cc)]
     for kw in seed_parts[:10]:
-        params.append(("keywords", kw))
+        params.append(("keywords[]", kw))
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
             url,
@@ -75,9 +75,21 @@ async def fetch_keywords_for_keywords(
             "FetchSERP keywords_suggestions: HTTP %s, url=%s body=%s",
             r.status_code, r.url, (r.text or "")[:400],
         )
-        return [], {"request_url": str(r.url), "http_status": r.status_code, "response_preview": (r.text or "")[:500]}
+        err_msg = None
+        try:
+            j = r.json()
+            err_msg = j.get("error") or j.get("message") or (j.get("data") if isinstance(j.get("data"), str) else None)
+        except Exception:
+            pass
+        debug = {
+            "request_url": str(r.url),
+            "http_status": r.status_code,
+            "response_preview": (r.text or "")[:500],
+            "api_error": err_msg,
+        }
+        return [], debug
     data = r.json()
-    # Ответ может быть: data.keywords_suggestions, data.data (список), keyword_suggestions, keywords, или data — массив на верхнем уровне
+    # По официальной схеме: data.keywords_suggestions — массив с полями keyword, avg_monthly_searches, low_top_of_page_bid_micros, high_top_of_page_bid_micros
     inner = data.get("data") if isinstance(data.get("data"), dict) else {}
     raw_list = (
         inner.get("keywords_suggestions")
@@ -111,7 +123,15 @@ async def fetch_keywords_for_keywords(
         else:
             kw = (item.get("keyword") or item.get("key") or item.get("query") or "").strip()
             vol = item.get("search_volume") or item.get("volume") or item.get("search_volume_avg") or item.get("avg_monthly_searches") or 0
+            # Дока: low_top_of_page_bid_micros / high_top_of_page_bid_micros (микро-единицы)
+            bid_lo = item.get("low_top_of_page_bid_micros")
+            bid_hi = item.get("high_top_of_page_bid_micros")
             cpc = item.get("cpc") or item.get("avg_cpc") or 0.0
+            if cpc == 0.0 and (bid_lo is not None or bid_hi is not None):
+                try:
+                    cpc = (float(bid_lo or 0) + float(bid_hi or 0)) / 2 / 1_000_000
+                except (TypeError, ValueError):
+                    pass
         if not kw or kw.lower() in seen:
             continue
         seen.add(kw.lower())
