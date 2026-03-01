@@ -120,7 +120,7 @@ async def suggest_keywords_from_external(
             limit=data.limit,
         )
     elif provider == "fetchserp":
-        keywords = await fetchserp_fetch(
+        keywords, _ = await fetchserp_fetch(
             c["api_key"],
             seed=data.seed,
             country=data.country,
@@ -170,7 +170,7 @@ async def suggest_keywords_by_offers_geo(
         if provider == "dataforseo":
             kws = await fetch_fn(auth[0], auth[1], seed=data.seed, country=country, limit=limit_per_geo)
         else:
-            kws = await fetch_fn(auth, seed=data.seed, country=country, limit=limit_per_geo)
+            kws, _ = await fetch_fn(auth, seed=data.seed, country=country, limit=limit_per_geo)
         for kw in kws:
             key_lower = kw["keyword"].lower()
             if key_lower not in merged or (kw.get("volume", 0) or 0) > (merged[key_lower].get("volume") or 0):
@@ -306,7 +306,7 @@ async def fetch_startup_keywords(
         if provider == "dataforseo":
             kws = await fetch_fn(auth[0], auth[1], seed=seed, country=data.country, limit=data.limit_per_seed)
         else:
-            kws = await fetch_fn(auth, seed=seed, country=data.country, limit=data.limit_per_seed)
+            kws, _ = await fetch_fn(auth, seed=seed, country=data.country, limit=data.limit_per_seed)
         for kw in kws:
             key_lower = kw["keyword"].lower()
             if key_lower not in merged or (kw.get("volume") or 0) > (merged[key_lower].get("volume") or 0):
@@ -371,8 +371,9 @@ async def auto_pull_and_import(
             c["login"], c["password"],
             seed=data.seed, country=data.country, limit=data.limit,
         )
+        fetchserp_debug = None
     else:
-        keywords = await fetchserp_fetch(c["api_key"], seed=data.seed, country=data.country, limit=data.limit)
+        keywords, fetchserp_debug = await fetchserp_fetch(c["api_key"], seed=data.seed, country=data.country, limit=data.limit)
 
     existing_r = await db.execute(select(Keyword.keyword).where(Keyword.campaign_id == data.campaign_id))
     existing_lower = {row[0].lower() for row in existing_r.all() if row[0]}
@@ -397,6 +398,8 @@ async def auto_pull_and_import(
     result = {"imported": len(created), "source": provider, "keywords": [{"keyword": k.keyword, "volume": k.volume} for k in created]}
     if len(created) == 0 and not keywords:
         result["hint"] = "Провайдер вернул 0 ключей. Проверьте Настройки → Интеграции (API ключ FetchSERP), попробуйте одну чёткую seed-фразу на английском, например: casual clicker game"
+        if provider == "fetchserp" and fetchserp_debug:
+            result["debug"] = fetchserp_debug
     elif len(created) == 0 and keywords:
         result["hint"] = "Все подтянутые ключи уже есть в кампании."
     return result

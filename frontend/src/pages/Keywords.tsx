@@ -74,12 +74,15 @@ export default function Keywords() {
   const autoPullMut = useMutation({
     mutationFn: (d: { campaign_id: number; seed: string; country: string; limit: number }) =>
       api.post("/keywords/auto-pull-and-import", d).then((r) => r.data),
-    onSuccess: (data: { imported: number; source?: string; hint?: string }) => {
+    onSuccess: (data: { imported: number; source?: string; hint?: string; debug?: { request_url?: string; response_keys?: string[]; response_preview?: string } }) => {
       qc.invalidateQueries({ queryKey: ["keywords", campaignId] });
       if (data.imported > 0) {
         toast.success(`Авто-импорт: добавлено ${data.imported} ключей (${data.source})`);
       } else if (data.hint) {
         toast.warning(data.hint);
+        if (data.debug?.request_url) {
+          console.warn("FetchSERP debug:", data.debug);
+        }
       } else {
         toast.info(`Авто-импорт: добавлено 0 ключей (${data.source})`);
       }

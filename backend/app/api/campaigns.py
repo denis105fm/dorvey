@@ -193,7 +193,7 @@ async def auto_create_campaign_from_offers(
                     if provider == "dataforseo":
                         kws = await fetch_fn(c["login"], c["password"], seed=seed, country=country, limit=limit_per_geo)
                     else:
-                        kws = await fetch_fn(c["api_key"], seed=seed, country=country, limit=limit_per_geo)
+                        kws, _ = await fetch_fn(c["api_key"], seed=seed, country=country, limit=limit_per_geo)
                     for kw in kws:
                         key_lower = kw["keyword"].lower()
                         if key_lower not in merged_kw or (kw.get("volume") or 0) > (merged_kw[key_lower].get("volume") or 0):

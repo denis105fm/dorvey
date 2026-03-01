@@ -1,6 +1,9 @@
 """FetchSERP API service for keyword suggestions and volume."""
 
+import logging
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # ISO country code (uppercase) -> FetchSERP country (lowercase, as in their API)
 COUNTRY_TO_FETCHSERP: dict[str, str] = {
@@ -32,28 +35,29 @@ async def fetch_keywords_for_keywords(
     seed: str,
     country: str = "US",
     limit: int = 100,
-) -> list[dict]:
+) -> tuple[list[dict], dict | None]:
     """
     Fetch keyword suggestions from FetchSERP keywords_suggestions API.
-    Returns list of dicts: {keyword, volume, cpc}.
+    Returns (list of dicts: {keyword, volume, cpc}, debug_info or None).
+    debug_info is set when result is empty (to diagnose 0 keys).
     """
     if not (api_key or "").strip():
-        return []
+        return [], None
     key_clean = _clean_api_key(api_key) or (api_key or "").strip()
     if not key_clean:
-        return []
+        return [], None
     seed_clean = (seed or "").strip()[:200]
     if not seed_clean:
-        return []
+        return [], None
     cc = _country_code(country)
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # API ждёт массив keywords: передаём каждую seed-фразу отдельно (через запятую в seed)
+    # API (Rails) ожидает массив: keywords[]=phrase1&keywords[]=phrase2
     seed_parts = [s.strip() for s in seed_clean.split(",") if s.strip()]
     if not seed_parts:
         seed_parts = [seed_clean]
     params = [("country", cc)]
     for kw in seed_parts[:10]:
-        params.append(("keywords", kw))
+        params.append(("keywords[]", kw))
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
             url,
@@ -65,7 +69,11 @@ async def fetch_keywords_for_keywords(
             },
         )
     if r.status_code != 200:
-        return []
+        logger.warning(
+            "FetchSERP keywords_suggestions: HTTP %s, url=%s body=%s",
+            r.status_code, r.url, (r.text or "")[:400],
+        )
+        return [], {"request_url": str(r.url), "http_status": r.status_code, "response_preview": (r.text or "")[:500]}
     data = r.json()
     # По доке: ответ { "data": { "keywords_suggestions": [ { "keyword", "avg_monthly_searches", ... } ] } }
     inner = data.get("data") if isinstance(data.get("data"), dict) else {}
@@ -78,6 +86,18 @@ async def fetch_keywords_for_keywords(
     )
     if not isinstance(raw_list, list):
         raw_list = []
+    if not raw_list:
+        logger.info(
+            "FetchSERP keywords_suggestions: 0 keys, request_url=%s response_keys=%s body_preview=%s",
+            r.url, list(data.keys()) if isinstance(data, dict) else type(data).__name__, (r.text or "")[:350],
+        )
+        debug = {
+            "request_url": str(r.url),
+            "response_keys": list(data.keys()) if isinstance(data, dict) else None,
+            "response_preview": (r.text or "")[:500],
+        }
+    else:
+        debug = None
     out: list[dict] = []
     seen: set[str] = set()
     for item in raw_list[:limit]:
@@ -100,7 +120,7 @@ async def fetch_keywords_for_keywords(
         except (TypeError, ValueError):
             cpc = 0.0
         out.append({"keyword": kw, "volume": vol, "cpc": cpc})
-    return out
+    return out, debug
 
 
 async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
