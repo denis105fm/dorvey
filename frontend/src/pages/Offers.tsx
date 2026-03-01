@@ -51,6 +51,9 @@ export default function Offers() {
   const [ocrProgress, setOcrProgress] = useState(0);
   const ocrInputRef = useRef<HTMLInputElement>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [applyDescModal, setApplyDescModal] = useState(false);
+  const [applyDescForm, setApplyDescForm] = useState({ description: "", restrictions: "", recommendations: "" });
+  const [applyDescToAll, setApplyDescToAll] = useState(false);
 
   useEffect(() => { setSelectedIds([]); }, [campaignId]);
 
@@ -95,6 +98,22 @@ export default function Offers() {
       toast.error(e?.response?.data?.detail ?? "Ошибка удаления");
     },
   });
+  const bulkApplyDescMut = useMutation({
+    mutationFn: async ({ ids, data }: { ids: number[]; data: { description: string; restrictions: string; recommendations: string } }) => {
+      await Promise.all(ids.map((id) => api.patch(`/offers/${id}`, { description: data.description || undefined, restrictions: data.restrictions || undefined, recommendations: data.recommendations || undefined })));
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      qc.invalidateQueries({ queryKey: ["offers", campaignId] });
+      setApplyDescModal(false);
+      setApplyDescForm({ description: "", restrictions: "", recommendations: "" });
+      setApplyDescToAll(false);
+      toast.success(`Описание применено к ${count} офферам`);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => {
+      toast.error(e?.response?.data?.detail ?? "Ошибка");
+    },
+  });
   const importMut = useMutation({
     mutationFn: async () => {
       if (!importFile) throw new Error("Выберите файл CSV");
@@ -125,7 +144,7 @@ export default function Offers() {
     setModal("edit");
   };
 
-  const runOcr = async (file: File) => {
+  const runOcr = async (file: File, onParsed?: (parsed: { description: string; restrictions: string; recommendations: string }) => void) => {
     setOcrStatus("loading");
     setOcrProgress(0);
     try {
@@ -136,18 +155,50 @@ export default function Offers() {
       const { data } = await worker.recognize(file);
       await worker.terminate();
       const parsed = parseOfferPageText(data.text);
-      setForm((f) => ({
-        ...f,
-        description: parsed.description || f.description,
-        restrictions: parsed.restrictions || f.restrictions,
-        recommendations: parsed.recommendations || f.recommendations,
-      }));
+      if (onParsed) {
+        onParsed(parsed);
+      } else {
+        setForm((f) => ({
+          ...f,
+          description: parsed.description || f.description,
+          restrictions: parsed.restrictions || f.restrictions,
+          recommendations: parsed.recommendations || f.recommendations,
+        }));
+      }
       setOcrStatus("done");
     } catch (e) {
       setOcrStatus("error");
     }
     if (ocrInputRef.current) ocrInputRef.current.value = "";
   };
+
+  useEffect(() => {
+    if (modal !== "create" && modal !== "edit") return;
+    const onPaste = (e: ClipboardEvent) => {
+      const item = e.clipboardData?.items && Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"));
+      const file = item?.getAsFile();
+      if (file) {
+        e.preventDefault();
+        runOcr(file);
+      }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [modal]);
+
+  useEffect(() => {
+    if (!applyDescModal) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const item = e.clipboardData?.items && Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"));
+      const file = item?.getAsFile();
+      if (file) {
+        e.preventDefault();
+        runOcr(file, (parsed) => setApplyDescForm({ description: parsed.description, restrictions: parsed.restrictions, recommendations: parsed.recommendations }));
+      }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [applyDescModal]);
 
   return (
     <div>
@@ -161,6 +212,13 @@ export default function Offers() {
         </div>
         <button onClick={() => { setModal("create"); setForm({ url: "", name: "", rate: "", amount: "", term: "", geo: "", device: "", priority: 0, is_active: true, description: "", restrictions: "", recommendations: "" }); }} className="mt-6 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium">Добавить оффер</button>
         <button onClick={() => { setModal("import"); setImportUrl(""); setImportFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }} className="mt-6 px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm font-medium">Импорт из Zeydoo CSV</button>
+        <button
+          type="button"
+          onClick={() => { setApplyDescToAll(true); setApplyDescForm({ description: "", restrictions: "", recommendations: "" }); setApplyDescModal(true); }}
+          className="mt-6 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-medium"
+        >
+          Условия для всех офферов кампании
+        </button>
       </div>
       {crossCampaignSuggestions?.suggestions?.length > 0 && (
         <div className="mb-4 p-4 rounded-xl bg-violet-500/10 border border-violet-500/30">
@@ -186,7 +244,7 @@ export default function Offers() {
           {offers?.length ? (
             <>
               {selectedIds.length > 0 && (
-                <div className="px-4 py-2 bg-slate-700/50 border-b border-slate-700 flex items-center gap-3">
+                <div className="px-4 py-2 bg-slate-700/50 border-b border-slate-700 flex items-center gap-3 flex-wrap">
                   <span className="text-slate-300 text-sm">Выбрано: {selectedIds.length}</span>
                   <button
                     type="button"
@@ -197,6 +255,13 @@ export default function Offers() {
                     className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded-lg text-white text-sm"
                   >
                     {bulkDeleteMut.isPending ? "Удаление…" : "Удалить выбранные"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setApplyDescToAll(false); setApplyDescModal(true); }}
+                    className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-white text-sm"
+                  >
+                    Применить описание к выбранным
                   </button>
                   <button type="button" onClick={() => setSelectedIds([])} className="text-slate-400 hover:text-white text-sm">Снять выделение</button>
                 </div>
@@ -307,12 +372,13 @@ export default function Offers() {
                 <input type="checkbox" checked={form.is_active} onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} />
                 Активен
               </label>
-              <p className="text-slate-500 text-xs mt-2">Полная картина оффера: вставьте текстом со страницы Zeydoo или загрузите скриншот — текст распознается и разойдётся по блокам.</p>
+              <p className="text-slate-500 text-xs mt-2">Полная картина оффера: вставьте текстом со страницы Zeydoo или загрузите скриншот / вставьте скриншот из буфера (Ctrl+V) — текст распознается и разойдётся по блокам.</p>
               <div className="flex items-center gap-3 flex-wrap">
                 <input ref={ocrInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) runOcr(f); }} />
                 <button type="button" onClick={() => ocrInputRef.current?.click()} disabled={ocrStatus === "loading"} className="px-3 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 rounded-lg text-white text-sm">
                   {ocrStatus === "loading" ? `Распознавание… ${ocrProgress}%` : "Распознать со скрина"}
                 </button>
+                <span className="text-slate-500 text-xs">или вставьте скриншот (Ctrl+V)</span>
                 {ocrStatus === "done" && <span className="text-emerald-400 text-sm">Готово</span>}
                 {ocrStatus === "error" && <span className="text-red-400 text-sm">Ошибка распознавания</span>}
               </div>
@@ -332,6 +398,41 @@ export default function Offers() {
             <div className="flex justify-end gap-2 mt-4 shrink-0">
               <button onClick={() => { setModal(null); setEdit(null); }} className="px-4 py-2 bg-slate-600 rounded-lg text-white">Отмена</button>
               <button onClick={() => modal === "create" ? createMut.mutate({ ...form, campaign_id: campaignId }) : edit && updateMut.mutate({ id: edit.id, data: form })} disabled={!form.url || createMut.isPending || updateMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white">Сохранить</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {applyDescModal && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4" onClick={() => { setApplyDescModal(false); setApplyDescToAll(false); }}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full max-h-[90vh] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-2">{applyDescToAll ? `Применить описание ко всем офферам кампании` : `Применить описание к ${selectedIds.length} офферам`}</h2>
+            <p className="text-slate-400 text-sm mb-4">Вставьте текст один раз — он будет записан во все выбранные офферы (описание, ограничения, рекомендации одинаковы для всех стран одного оффера).</p>
+            <p className="text-slate-500 text-xs mb-2">Можно вставить скриншот страницы Zeydoo (Ctrl+V) — текст распознается и подставится в блоки. {ocrStatus === "loading" && <span className="text-amber-400">Распознавание… {ocrProgress}%</span>} {ocrStatus === "done" && <span className="text-emerald-400">Готово</span>}</p>
+            <div className="space-y-3 overflow-y-auto min-h-0">
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Description (описание, постбек, языки)</label>
+                <textarea value={applyDescForm.description} onChange={(e) => setApplyDescForm((f) => ({ ...f, description: e.target.value }))} placeholder="Текст из блока Description..." rows={3} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 text-sm resize-y" />
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Restrictions (ограничения, тест-кап, запрещённые источники)</label>
+                <textarea value={applyDescForm.restrictions} onChange={(e) => setApplyDescForm((f) => ({ ...f, restrictions: e.target.value }))} placeholder="Текст из блока Restrictions..." rows={3} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 text-sm resize-y" />
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Our recommendations (рекомендации по трафику)</label>
+                <textarea value={applyDescForm.recommendations} onChange={(e) => setApplyDescForm((f) => ({ ...f, recommendations: e.target.value }))} placeholder="Текст из блока Our recommendations..." rows={2} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 text-sm resize-y" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4 shrink-0">
+              <button onClick={() => { setApplyDescModal(false); setApplyDescToAll(false); }} className="px-4 py-2 bg-slate-600 rounded-lg text-white">Отмена</button>
+              <button
+                onClick={() => bulkApplyDescMut.mutate({ ids: applyDescToAll ? (offers ?? []).map((o: Offer) => o.id) : [...selectedIds], data: applyDescForm })}
+                disabled={bulkApplyDescMut.isPending || (applyDescToAll ? !(offers?.length) : selectedIds.length === 0)}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded-lg text-white"
+              >
+                {bulkApplyDescMut.isPending ? "Применяю…" : "Применить"}
+              </button>
             </div>
           </div>
         </div>,
