@@ -404,6 +404,8 @@ async def auto_pull_and_import(
                 err = fetchserp_debug.get("api_error") or fetchserp_debug.get("response_preview", "")[:200]
                 if err:
                     result["hint"] += f" Ошибка API (HTTP {fetchserp_debug.get('http_status')}): {err}"
+                if fetchserp_debug.get("http_status") == 500:
+                    result["hint"] += " Ошибка на стороне FetchSERP — попробуйте позже или напишите в support@fetchserp.com."
     elif len(created) == 0 and keywords:
         result["hint"] = "Все подтянутые ключи уже есть в кампании."
     return result

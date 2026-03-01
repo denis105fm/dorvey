@@ -70,6 +70,18 @@ async def fetch_keywords_for_keywords(
                 "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
             },
         )
+        # При 500 пробуем один раз с одной ключевой фразой (иногда провайдер падает на нескольких)
+        if r.status_code == 500 and len(seed_parts) > 1:
+            params_one = [("country", cc), ("keywords", seed_parts[0])]
+            r = await client.get(
+                url,
+                params=params_one,
+                headers={
+                    "Authorization": f"Bearer {key_clean}",
+                    "Accept": "application/json",
+                    "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
+                },
+            )
     if r.status_code != 200:
         logger.warning(
             "FetchSERP keywords_suggestions: HTTP %s, url=%s body=%s",
