@@ -51,13 +51,15 @@ async def fetch_keywords_for_keywords(
         return [], None
     cc = _country_code(country)
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # API (Rails) ожидает массив: keywords[]=phrase1&keywords[]=phrase2
-    seed_parts = [s.strip() for s in seed_clean.split(",") if s.strip()]
+    # Параметр keywords (повторяемый): keywords=phrase1&keywords=phrase2. Короткие части (<2 символов) не отправляем.
+    seed_parts = [s.strip() for s in seed_clean.split(",") if len(s.strip()) >= 2]
     if not seed_parts:
-        seed_parts = [seed_clean]
+        seed_parts = [seed_clean] if len(seed_clean) >= 2 else []
+    if not seed_parts:
+        return [], None
     params = [("country", cc)]
     for kw in seed_parts[:10]:
-        params.append(("keywords[]", kw))
+        params.append(("keywords", kw))
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
             url,
@@ -75,13 +77,15 @@ async def fetch_keywords_for_keywords(
         )
         return [], {"request_url": str(r.url), "http_status": r.status_code, "response_preview": (r.text or "")[:500]}
     data = r.json()
-    # По доке: ответ { "data": { "keywords_suggestions": [ { "keyword", "avg_monthly_searches", ... } ] } }
+    # Ответ может быть: data.keywords_suggestions, data.data (список), keyword_suggestions, keywords, или data — массив на верхнем уровне
     inner = data.get("data") if isinstance(data.get("data"), dict) else {}
     raw_list = (
         inner.get("keywords_suggestions")
+        or inner.get("keywords")
+        or (inner.get("data") if isinstance(inner.get("data"), list) else None)
         or data.get("keyword_suggestions")
         or data.get("keywords")
-        or data.get("data")
+        or (data.get("data") if isinstance(data.get("data"), list) else None)
         or (data if isinstance(data, list) else [])
     )
     if not isinstance(raw_list, list):
