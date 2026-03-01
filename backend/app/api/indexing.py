@@ -114,6 +114,96 @@ async def submit_doorway(
     }
 
 
+@router.post("/submit-domain/{domain_id}")
+async def submit_domain(
+    domain_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit all doorway URLs of the domain to GSC and Bing (respects GSC rate limit)."""
+    from app.services.gsc_ratelimit import check_gsc_limit, record_gsc_submission
+
+    r = await db.execute(
+        select(Domain).where(Domain.id == domain_id)
+    )
+    dom = r.scalar_one_or_none()
+    if not dom:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    r2 = await db.execute(
+        select(Doorway)
+        .join(Campaign)
+        .where(
+            Doorway.domain_id == domain_id,
+            Campaign.user_id == current_user.id,
+            Doorway.status.in_(["deployed", "indexed", "draft"]),
+        )
+    )
+    doorways = list(r2.scalars().all())
+    if not doorways:
+        return {
+            "status": "ok",
+            "domain": dom.domain,
+            "sitemap_url": f"https://{dom.domain.replace('https://', '').replace('http://', '').strip().rstrip('/')}/sitemap.xml",
+            "submitted": 0,
+            "gsc_count": 0,
+            "bing_count": 0,
+            "rate_limited": False,
+            "message": "No doorways to submit",
+        }
+
+    cred_r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == current_user.id,
+            Setting.key.in_([
+                "gsc_client_id", "gsc_client_secret", "gsc_refresh_token",
+                "bing_api_key",
+            ]),
+        )
+    )
+    creds = {s.key: (s.value or "").strip() for s in cred_r.scalars().all()}
+
+    sitemap_url = f"https://{dom.domain.replace('https://', '').replace('http://', '').strip().rstrip('/')}/sitemap.xml"
+    gsc_count = 0
+    bing_count = 0
+    submitted = 0
+
+    for dw in doorways:
+        url = await get_doorway_url(db, dw.id)
+        if not url:
+            continue
+        if creds.get("gsc_client_id") and creds.get("gsc_client_secret") and creds.get("gsc_refresh_token"):
+            allowed, _ = check_gsc_limit(current_user.id)
+            if allowed:
+                gsc_ok, _ = await submit_to_gsc(
+                    url,
+                    creds["gsc_client_id"],
+                    creds["gsc_client_secret"],
+                    creds["gsc_refresh_token"],
+                )
+                if gsc_ok:
+                    record_gsc_submission(current_user.id)
+                    gsc_count += 1
+            else:
+                break
+        if creds.get("bing_api_key"):
+            bing_ok, _ = await submit_to_bing(url, creds["bing_api_key"])
+            if bing_ok:
+                bing_count += 1
+        submitted += 1
+
+    return {
+        "status": "ok",
+        "domain": dom.domain,
+        "sitemap_url": sitemap_url,
+        "submitted": submitted,
+        "total": len(doorways),
+        "gsc_count": gsc_count,
+        "bing_count": bing_count,
+        "rate_limited": submitted < len(doorways) and bool(creds.get("gsc_client_id")),
+        "message": f"Submitted {submitted}/{len(doorways)} URLs" + (" (GSC limit reached)" if submitted < len(doorways) else ""),
+    }
+
+
 class GscFetchRequest(BaseModel):
     domain_id: int
     site_url: str  # GSC property: sc-domain:example.com or https://example.com/

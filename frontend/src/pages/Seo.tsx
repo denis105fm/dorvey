@@ -35,6 +35,7 @@ export default function Seo() {
   const [gscDomainId, setGscDomainId] = useState<number>(0);
   const [gscSiteUrl, setGscSiteUrl] = useState("");
   const [gscDays, setGscDays] = useState(28);
+  const [submitDomainId, setSubmitDomainId] = useState<number>(0);
   const qc = useQueryClient();
   const gscFetchMut = useMutation({
     mutationFn: (d: { domain_id: number; site_url: string; days: number }) =>
@@ -45,6 +46,19 @@ export default function Seo() {
     },
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e?.response?.data?.detail ?? "Ошибка GSC"),
+  });
+  const submitDomainMut = useMutation({
+    mutationFn: (domain_id: number) =>
+      api.post(`/indexing/submit-domain/${domain_id}`).then((r) => r.data),
+    onSuccess: (data: { submitted: number; total: number; sitemap_url?: string; rate_limited?: boolean }) => {
+      toast.success(
+        data.rate_limited
+          ? `Отправлено ${data.submitted}/${data.total} (лимит GSC)`
+          : `Отправлено ${data.submitted} URL в GSC/Bing`
+      );
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e?.response?.data?.detail ?? "Ошибка отправки"),
   });
   const { data: domainSuggestions } = useQuery({
     queryKey: ["seo", "domains", suggestKeyword, suggestRegion],
@@ -79,6 +93,30 @@ export default function Seo() {
               {gscFetchMut.isPending ? "Загрузка…" : "Импорт из GSC"}
             </button>
           </div>
+        </div>
+        <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
+          <h2 className="text-lg font-medium text-white mb-4">Отправить все URL домена в GSC/Bing</h2>
+          <p className="text-slate-400 text-sm mb-3">Отправка всех страниц выбранного домена в Google Search Console и Bing для индексации. Учитывается лимит GSC (200/час).</p>
+          <div className="flex gap-4 flex-wrap items-end mb-4">
+            <div>
+              <label className="block text-slate-400 text-xs mb-1">Домен</label>
+              <select value={submitDomainId} onChange={(e) => setSubmitDomainId(Number(e.target.value))} className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white w-48">
+                <option value={0}>—</option>
+                {domains?.map((d: { id: number; domain: string }) => <option key={d.id} value={d.id}>{d.domain}</option>)}
+              </select>
+            </div>
+            <button onClick={() => submitDomainId && submitDomainMut.mutate(submitDomainId)} disabled={!submitDomainId || submitDomainMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white text-sm">
+              {submitDomainMut.isPending ? "Отправка…" : "Отправить все URL домена"}
+            </button>
+          </div>
+          {domains?.length ? (
+            <p className="text-slate-500 text-xs">
+              Добавьте sitemap в GSC один раз для каждого домена:{" "}
+              <code className="bg-slate-700 px-1 rounded">
+                https://{(domains.find((d: { id: number }) => d.id === submitDomainId) as { domain?: string } | undefined)?.domain?.replace?.("https://", "").replace?.("http://", "") ?? "example.com"}/sitemap.xml
+              </code>
+            </p>
+          ) : null}
         </div>
         <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700">
           <h2 className="text-lg font-medium text-white mb-4">Каннибализация ключевых слов</h2>

@@ -50,7 +50,7 @@ def deploy_doorway_async(doorway_id: int):
     from app.models.server import Server
     from app.models.setting import Setting
     from app.models.campaign import Campaign
-    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push
+    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push, deploy_sitemap_robots_sync
     from datetime import datetime
 
     async def run():
@@ -101,6 +101,50 @@ def deploy_doorway_async(doorway_id: int):
             dw.status = "deployed"
             dw.deployed_at = datetime.utcnow()
             await db.commit()
+            if getattr(srv, "auth_type", None) != "ftp":
+                try:
+                    from app.services.indexing import generate_sitemap_xml, generate_robots_txt
+                    sitemap_xml = await generate_sitemap_xml(db, dom.id)
+                    if sitemap_xml:
+                        robots_txt = generate_robots_txt(dom.domain)
+                        deploy_sitemap_robots_sync(
+                            srv.host, srv.port or 22, srv.user,
+                            srv.auth_type or "password", srv.auth_data or "",
+                            srv.path or "/var/www/html",
+                            sitemap_xml, robots_txt,
+                        )
+                except Exception:
+                    pass
+                try:
+                    import secrets
+                    from app.services.deploy import deploy_indexnow_key_sync
+                    from app.services.indexing_submit import submit_to_indexnow
+                    key_r = await db.execute(
+                        select(Setting).where(
+                            Setting.user_id == camp.user_id,
+                            Setting.key == "indexnow_key",
+                        )
+                    )
+                    key_row = key_r.scalar_one_or_none()
+                    indexnow_key = (key_row.value or "").strip() if key_row else ""
+                    if not indexnow_key or len(indexnow_key) < 8:
+                        indexnow_key = secrets.token_hex(16)
+                        if key_row:
+                            key_row.value = indexnow_key
+                        else:
+                            db.add(Setting(user_id=camp.user_id, key="indexnow_key", value=indexnow_key))
+                        await db.commit()
+                    deploy_indexnow_key_sync(
+                        srv.host, srv.port or 22, srv.user,
+                        srv.auth_type or "password", srv.auth_data or "",
+                        srv.path or "/var/www/html", indexnow_key,
+                    )
+                    url = await get_doorway_url(db, doorway_id)
+                    if url:
+                        domain_origin = "https://" + (dom.domain or "").replace("https://", "").replace("http://", "").strip().rstrip("/")
+                        await submit_to_indexnow(url, indexnow_key, f"{domain_origin}/{indexnow_key}.txt")
+                except Exception:
+                    pass
             return {"status": "ok", "message": msg}
 
     try:
@@ -130,8 +174,8 @@ def deploy_batch_with_stagger(
     from app.models.server import Server
     from app.models.campaign import Campaign
     from app.models.setting import Setting
-    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push
-    from app.services.indexing import get_doorway_url
+    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push, deploy_sitemap_robots_sync, deploy_indexnow_key_sync
+    from app.services.indexing import get_doorway_url, generate_sitemap_xml, generate_robots_txt
     from datetime import datetime
 
     cfg = StaggerConfig(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)
@@ -188,6 +232,48 @@ def deploy_batch_with_stagger(
                             deploy_sw_push(srv, srv.path or "/var/www/html")
                 dw.status = "deployed"
                 dw.deployed_at = datetime.utcnow()
+                if getattr(srv, "auth_type", None) != "ftp":
+                    try:
+                        sitemap_xml = await generate_sitemap_xml(db, dom.id)
+                        if sitemap_xml:
+                            robots_txt = generate_robots_txt(dom.domain)
+                            deploy_sitemap_robots_sync(
+                                srv.host, srv.port or 22, srv.user,
+                                srv.auth_type or "password", srv.auth_data or "",
+                                srv.path or "/var/www/html",
+                                sitemap_xml, robots_txt,
+                            )
+                    except Exception:
+                        pass
+                    try:
+                        import secrets
+                        from app.services.indexing_submit import submit_to_indexnow
+                        key_r = await db.execute(
+                            select(Setting).where(
+                                Setting.user_id == camp.user_id,
+                                Setting.key == "indexnow_key",
+                            )
+                        )
+                        key_row = key_r.scalar_one_or_none()
+                        indexnow_key = (key_row.value or "").strip() if key_row else ""
+                        if not indexnow_key or len(indexnow_key) < 8:
+                            indexnow_key = secrets.token_hex(16)
+                            if key_row:
+                                key_row.value = indexnow_key
+                            else:
+                                db.add(Setting(user_id=camp.user_id, key="indexnow_key", value=indexnow_key))
+                            await db.commit()
+                        deploy_indexnow_key_sync(
+                            srv.host, srv.port or 22, srv.user,
+                            srv.auth_type or "password", srv.auth_data or "",
+                            srv.path or "/var/www/html", indexnow_key,
+                        )
+                        url_in = await get_doorway_url(db, dw_id)
+                        if url_in:
+                            domain_origin = "https://" + (dom.domain or "").replace("https://", "").replace("http://", "").strip().rstrip("/")
+                            await submit_to_indexnow(url_in, indexnow_key, f"{domain_origin}/{indexnow_key}.txt")
+                    except Exception:
+                        pass
                 results.append({"doorway_id": dw_id, "ok": True, "msg": msg})
                 url = await get_doorway_url(db, dw_id)
                 if url and camp:

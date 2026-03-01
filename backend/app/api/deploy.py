@@ -12,8 +12,8 @@ from app.models.campaign import Campaign
 from app.models.domain import Domain
 from app.models.setting import Setting
 from app.models.server import Server
-from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl
-from app.services.indexing import get_doorway_url
+from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl, deploy_sitemap_robots_sync, deploy_indexnow_key_sync
+from app.services.indexing import get_doorway_url, generate_sitemap_xml, generate_robots_txt
 
 router = APIRouter()
 
@@ -35,6 +35,12 @@ async def _submit_to_indexing_after_deploy(url: str, user_id: int, creds: dict) 
                 record_gsc_submission(user_id)
     if creds.get("bing_api_key"):
         await submit_to_bing(url, creds["bing_api_key"])
+
+
+async def _submit_indexnow_after_deploy(url: str, key: str, key_location: str) -> None:
+    """Фоновая отправка URL в IndexNow после деплоя."""
+    from app.services.indexing_submit import submit_to_indexnow
+    await submit_to_indexnow(url, key, key_location)
 
 
 class BatchDeployRequest(BaseModel):
@@ -150,6 +156,65 @@ async def deploy_doorway(
     except Exception:
         pass
     url = await get_doorway_url(db, doorway_id)
+    # Sitemap + robots.txt on server (SSH only, automatic)
+    if getattr(srv, "auth_type", None) != "ftp":
+        import asyncio
+        sitemap_xml = await generate_sitemap_xml(db, dom.id)
+        if sitemap_xml:
+            robots_txt = generate_robots_txt(dom.domain)
+            try:
+                ok_sr, msg_sr = await asyncio.to_thread(
+                    deploy_sitemap_robots_sync,
+                    srv.host,
+                    srv.port or 22,
+                    srv.user,
+                    srv.auth_type or "password",
+                    srv.auth_data or "",
+                    srv.path or "/var/www/html",
+                    sitemap_xml,
+                    robots_txt,
+                )
+                if ok_sr:
+                    msg += "; sitemap+robots deployed"
+                else:
+                    msg += "; sitemap/robots: " + (msg_sr[:80] if msg_sr else "failed")
+            except Exception as e:
+                msg += "; sitemap/robots: " + str(e)[:80]
+    # IndexNow: upload key file and submit URL (SSH only)
+    if getattr(srv, "auth_type", None) != "ftp" and url:
+        import secrets
+        key_r = await db.execute(
+            select(Setting).where(
+                Setting.user_id == current_user.id,
+                Setting.key == "indexnow_key",
+            )
+        )
+        key_row = key_r.scalar_one_or_none()
+        indexnow_key = (key_row.value or "").strip() if key_row else ""
+        if not indexnow_key or len(indexnow_key) < 8:
+            indexnow_key = secrets.token_hex(16)
+            if key_row:
+                key_row.value = indexnow_key
+                key_row.updated_at = datetime.utcnow()
+            else:
+                db.add(Setting(user_id=current_user.id, key="indexnow_key", value=indexnow_key))
+            await db.commit()
+        try:
+            await asyncio.to_thread(
+                deploy_indexnow_key_sync,
+                srv.host, srv.port or 22, srv.user,
+                srv.auth_type or "password", srv.auth_data or "",
+                srv.path or "/var/www/html",
+                indexnow_key,
+            )
+            domain_origin = "https://" + (dom.domain or "").replace("https://", "").replace("http://", "").strip().rstrip("/")
+            key_location = f"{domain_origin}/{indexnow_key}.txt"
+            background_tasks.add_task(
+                _submit_indexnow_after_deploy,
+                url, indexnow_key, key_location,
+            )
+        except Exception:
+            pass
     if url:
         cred_r = await db.execute(
             select(Setting).where(

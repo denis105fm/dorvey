@@ -1,4 +1,4 @@
-"""Submit URLs to GSC and Bing for indexing."""
+"""Submit URLs to GSC, Bing, and IndexNow for indexing."""
 
 import asyncio
 from typing import Optional
@@ -78,5 +78,25 @@ async def submit_to_bing(url: str, api_key: str, site_url: Optional[str] = None)
             if 200 <= r.status_code < 300:
                 return True, "Submitted to Bing"
             return False, f"Bing API error {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+async def submit_to_indexnow(url: str, key: str, key_location: str) -> tuple[bool, str]:
+    """
+    Submit URL to IndexNow (Bing, Yandex, etc.).
+    key: hex key (8-128 chars). key_location: full URL to key file (e.g. https://domain.com/key.txt).
+    Returns (success, message).
+    """
+    if not key or len(key) < 8:
+        return False, "IndexNow key missing or too short"
+    try:
+        api_url = "https://api.indexnow.org/indexnow"
+        params = {"url": url, "key": key, "keyLocation": key_location}
+        async with httpx.AsyncClient() as client:
+            r = await client.get(api_url, params=params, timeout=10.0)
+            if r.status_code == 200:
+                return True, "Submitted to IndexNow"
+            return False, f"IndexNow {r.status_code}: {r.text[:200]}"
     except Exception as e:
         return False, str(e)

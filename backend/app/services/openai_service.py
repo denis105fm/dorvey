@@ -89,17 +89,17 @@ class OpenAIService:
         *,
         keyword: str,
         language: str = "ru",
-        max_items: int = 5,
+        max_items: int = 8,
         api_key_override: Optional[str] = None,
     ) -> list[dict[str, str]]:
-        """Generate 3-5 Q&A pairs for PAA/FAQ schema (People Also Ask). Returns list of {question, answer}."""
+        """Generate 5-8 Q&A pairs for PAA/FAQ schema (People Also Ask). Returns list of {question, answer}."""
         client = self.get_client_for_key(api_key_override)
         system_prompt = f"""Ты — SEO-копирайтер. Создаёшь короткие вопросы и ответы для блока "Часто спрашивают" (FAQ) на странице.
 Язык: {language}. Тема: запрос пользователя.
 
 Правила: вопросы — как в поиске (People Also Ask). Ответы — 1-3 предложения, по делу. Без рекламы.
 Ответ — только валидный JSON массив: [{{"question": "...", "answer": "..."}}, ...]
-Минимум 3, максимум {max_items} пар."""
+Минимум 5, максимум {max_items} пар."""
 
         user_prompt = f'Тема/ключевой запрос: "{keyword}"'
 

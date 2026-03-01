@@ -7,7 +7,7 @@ from app.services.anti_detection import shuffle_block_order
 
 
 # Block names for structural variation (order randomized per page)
-DEFAULT_BLOCKS = ["content", "trust", "urgency", "comparison", "social_proof", "faq", "cta", "cta_footer"]
+DEFAULT_BLOCKS = ["content", "trust", "urgency", "comparison", "social_proof", "faq", "internal_links", "cta", "cta_footer"]
 
 
 # Layout variants: different class prefixes / structure (anti-fingerprint)
@@ -29,6 +29,7 @@ DEFAULT_PAGE_TEMPLATE = """<!DOCTYPE html>
     <title>{{ title }}</title>
     <meta name="description" content="{{ meta_description }}">
     {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
+    {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
     {% if faq_schema %}<script type="application/ld+json">{{ faq_schema | safe }}</script>{% endif %}
     {% if article_schema %}{{ article_schema | safe }}{% endif %}
     <style>
@@ -59,6 +60,12 @@ DEFAULT_PAGE_TEMPLATE = """<!DOCTYPE html>
         .faq-item { margin: 0.75rem 0; padding-bottom: 0.75rem; border-bottom: 1px solid #e5e7eb; }
         .faq-item h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem 0; color: #16a34a; }
         .faq-item p { margin: 0; font-size: 0.95rem; }
+        .internal-links-wrap { margin: 1.5rem 0; }
+        .internal-links-wrap h2 { font-size: 1.25rem; margin-bottom: 0.75rem; color: #111; }
+        .internal-links-list { list-style: none; padding: 0; margin: 0; }
+        .internal-links-list li { margin: 0.5rem 0; }
+        .internal-links-list a { color: #16a34a; text-decoration: none; }
+        .internal-links-list a:hover { text-decoration: underline; }
     </style>
 </head>
 <body class="{{ body_class }}"{% if data_offers %} data-offers="{{ data_offers | e }}" data-doorway-id="{{ doorway_id | default('') }}"{% endif %}>
@@ -87,6 +94,7 @@ def _build_main_content(
     social_proof_block: Optional[str] = None,
     cta_footer: bool = True,
     faq_block: Optional[str] = None,
+    internal_links_block: Optional[str] = None,
 ) -> str:
     """Assemble body blocks in given order (structural randomization)."""
     cta_html = ""
@@ -117,6 +125,7 @@ def _build_main_content(
         "comparison": f'<div class="comparison-table">{comparison_table}</div>' if comparison_table else "",
         "social_proof": f'<div class="social-proof">{social_proof_block}</div>' if social_proof_block else "",
         "faq": f'<div class="faq-block">{faq_block}</div>' if faq_block else "",
+        "internal_links": f'<div class="internal-links-wrap">{internal_links_block}</div>' if internal_links_block else "",
         "cta": cta_html,
         "cta_footer": cta_footer_html,
     }
@@ -155,6 +164,7 @@ def render_doorway_page(
     doorway_id: Optional[int] = None,
     cta_footer: bool = True,
     faq_block: Optional[str] = None,
+    internal_links_block: Optional[str] = None,
     visitor_capture: bool = False,
     analytics_base: Optional[str] = None,
     push_subscribe_enabled: bool = False,
@@ -162,6 +172,7 @@ def render_doorway_page(
     email_capture_enabled: bool = False,
     facebook_pixel_id: Optional[str] = None,
     google_ads_id: Optional[str] = None,
+    og_image_url: Optional[str] = None,
 ) -> str:
     """
     Render full HTML page. structural_seed=(domain, path, doorway_id) enables
@@ -197,6 +208,7 @@ def render_doorway_page(
         social_proof_block=social_proof_block,
         cta_footer=cta_footer,
         faq_block=faq_block,
+        internal_links_block=internal_links_block,
     )
     body_class = css_variant["main"]
 
@@ -348,6 +360,7 @@ var esc2=false;window.addEventListener('scroll',function(){{if(esc2)return;var h
         doorway_id=doorway_id if doorway_id is not None else (_dw_id or ""),
         push_block=push_block,
         email_capture_block=email_capture_block,
+        og_image_url=og_image_url or "",
     )
     # Inject Hotjar/Clarity before </head> so they work with any template
     scripts = []

@@ -70,7 +70,7 @@ async def generate_doorway(
         faq_qa = await openai_service.generate_faq(
             keyword=keyword,
             language=camp.language,
-            max_items=5,
+            max_items=8,
             api_key_override=user_openai_key,
         )
         if faq_qa:

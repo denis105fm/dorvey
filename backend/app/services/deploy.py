@@ -84,6 +84,91 @@ def _get_ssh_client(server: Server) -> paramiko.SSHClient:
     return client
 
 
+def _get_ssh_client_from_params(
+    host: str,
+    port: int,
+    user: str,
+    auth_type: str,
+    auth_data: Optional[str],
+) -> paramiko.SSHClient:
+    """Build SSH client from raw params (for use in background tasks)."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    connect_kw = {
+        "hostname": host,
+        "port": port or 22,
+        "username": user,
+    }
+    if auth_type == "password":
+        connect_kw["password"] = auth_data or ""
+    else:
+        key = auth_data
+        if key and "\n" in key:
+            pkey = paramiko.RSAKey.from_private_key(io.StringIO(key))
+        elif key:
+            pkey = paramiko.RSAKey.from_private_key_file(key)
+        else:
+            pkey = None
+        if pkey:
+            connect_kw["pkey"] = pkey
+        else:
+            connect_kw["password"] = ""
+    client.connect(**connect_kw)
+    return client
+
+
+def deploy_sitemap_robots_sync(
+    host: str,
+    port: int,
+    user: str,
+    auth_type: str,
+    auth_data: Optional[str],
+    base_path: str,
+    sitemap_xml: str,
+    robots_txt: str,
+) -> tuple[bool, str]:
+    """Upload sitemap.xml and robots.txt to server web root. Returns (success, message)."""
+    try:
+        client = _get_ssh_client_from_params(host, port, user, auth_type, auth_data)
+        sftp = client.open_sftp()
+        root = (base_path or "/var/www/html").rstrip("/")
+        for name, content in [("sitemap.xml", sitemap_xml), ("robots.txt", robots_txt)]:
+            remote = f"{root}/{name}"
+            buf = io.BytesIO(content.encode("utf-8"))
+            sftp.putfo(buf, remote)
+        sftp.close()
+        client.close()
+        return True, f"sitemap.xml and robots.txt deployed to {root}"
+    except Exception as e:
+        return False, str(e)
+
+
+def deploy_indexnow_key_sync(
+    host: str,
+    port: int,
+    user: str,
+    auth_type: str,
+    auth_data: Optional[str],
+    base_path: str,
+    key: str,
+) -> tuple[bool, str]:
+    """Upload IndexNow key file {key}.txt to server web root. Returns (success, message)."""
+    if not key or len(key) < 8:
+        return False, "IndexNow key missing or too short"
+    try:
+        client = _get_ssh_client_from_params(host, port, user, auth_type, auth_data)
+        sftp = client.open_sftp()
+        root = (base_path or "/var/www/html").rstrip("/")
+        remote = f"{root}/{key}.txt"
+        buf = io.BytesIO(key.encode("utf-8"))
+        sftp.putfo(buf, remote)
+        sftp.close()
+        client.close()
+        return True, f"{key}.txt deployed to {root}"
+    except Exception as e:
+        return False, str(e)
+
+
 def deploy_doorway_ftp(
     host: str,
     user: str,
@@ -409,6 +494,8 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
             cta_href += f"&oid={best_offer_id}"
 
     canonical = f"https://{dom.domain}{dw.path}" if dw.path != "/" else f"https://{dom.domain}"
+    d_clean = (dom.domain or "").replace("https://", "").replace("http://", "").strip().rstrip("/")
+    og_image_url = f"https://{d_clean}/og-image.jpg" if d_clean else None
     # Load user settings: heatmaps, exit-intent, trust
     hotjar_id = clarity_id = None
     exit_intent = trust_elements = False
@@ -442,6 +529,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         get_cta_preset,
     )
     from app.services.anti_detection import get_schema_variant, _seed_from_url
+    from app.services.seo_tools import get_internal_links_suggestions
 
     domain = dom.domain or ""
     path = (dw.path or "/").strip() or "/"
@@ -450,7 +538,12 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     desc = dw.meta_description or ""
     schemas = []
     if schema_variant in ("article", "both"):
-        schemas.append(build_article_schema(title=title, description=desc, url=canonical))
+        date_pub = None
+        if getattr(dw, "deployed_at", None):
+            date_pub = dw.deployed_at.isoformat() if hasattr(dw.deployed_at, "isoformat") else str(dw.deployed_at)
+        elif getattr(dw, "created_at", None):
+            date_pub = dw.created_at.isoformat() if hasattr(dw.created_at, "isoformat") else str(dw.created_at)
+        schemas.append(build_article_schema(title=title, description=desc, url=canonical, date_published=date_pub))
     if schema_variant in ("webpage", "both"):
         schemas.append(build_webpage_schema(title=title, description=desc, url=canonical))
     article_schema = "".join(
@@ -475,6 +568,19 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
                 )
         if len(parts_faq) > 1:
             faq_block = "".join(parts_faq)
+
+    internal_links = await get_internal_links_suggestions(db, doorway_id, camp.id, max_links=3)
+    internal_links_block = None
+    if internal_links:
+        parts_il = ['<h2>Ещё по теме</h2><ul class="internal-links-list">']
+        for link in internal_links:
+            url_esc = html.escape(link.get("url") or "")
+            title_esc = html.escape(link.get("title") or link.get("anchor") or "")
+            if url_esc and title_esc:
+                parts_il.append(f'<li><a href="{url_esc}" rel="internal">{title_esc}</a></li>')
+        if len(parts_il) > 1:
+            parts_il.append("</ul>")
+            internal_links_block = '<div class="internal-links">' + "".join(parts_il) + "</div>"
 
     camp_settings = (camp.affiliate_rules or {}).get("settings") or {}
     cta_by_device = (dw.cloaking_rules or {}).get("cta_by_device") or camp_settings.get("cta_by_device")
@@ -592,6 +698,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         data_offers=None if for_bot else data_offers,
         doorway_id=dw.id,
         faq_block=faq_block,
+        internal_links_block=internal_links_block,
         visitor_capture=False if for_bot else (visitor_capture and bool(click_base)),
         analytics_base=click_base or "",
         push_subscribe_enabled=False if for_bot else (visitor_capture and bool(click_base) and bool(vapid_public)),
@@ -599,4 +706,5 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         email_capture_enabled=False if for_bot else (email_capture and bool(click_base)),
         facebook_pixel_id=None if for_bot else fb_pixel,
         google_ads_id=None if for_bot else ga_id,
+        og_image_url=og_image_url,
     )
