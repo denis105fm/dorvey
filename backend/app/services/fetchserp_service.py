@@ -51,7 +51,7 @@ async def fetch_keywords_for_keywords(
         return [], None
     cc = _country_code(country)
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # По доке: keywords — array, style form. В Rails GET-массивы передаются как keywords[]=val1&keywords[]=val2
+    # Передаём keywords без скобок (keywords=val1&keywords=val2). keywords[] давал HTTP 500 на стороне провайдера.
     seed_parts = [s.strip() for s in seed_clean.split(",") if len(s.strip()) >= 2]
     if not seed_parts:
         seed_parts = [seed_clean] if len(seed_clean) >= 2 else []
@@ -59,7 +59,7 @@ async def fetch_keywords_for_keywords(
         return [], None
     params = [("country", cc)]
     for kw in seed_parts[:10]:
-        params.append(("keywords[]", kw))
+        params.append(("keywords", kw))
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
             url,
