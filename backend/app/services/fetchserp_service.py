@@ -58,7 +58,7 @@ async def fetch_keywords_for_keywords(
         return [], None
     cc = _country_code(country)  # всегда lowercase (us, ru), т.к. API требует
     url = f"{FETCHSERP_API_BASE}/api/v1/keywords_suggestions"
-    # Rails (OasRails) ожидает массив через keywords[]; keywords=...&keywords=... парсится в строку → 500
+    # Пробуем оба формата: keywords[] (Rails) и keywords (как в их cURL в доке) — при 500 делаем retry.
     seed_parts = [s.strip() for s in seed_clean.split(",") if (s or "").strip() and len((s or "").strip()) >= 2]
     if not seed_parts:
         seed_parts = [seed_clean.strip()] if len(seed_clean.strip()) >= 2 else []
@@ -66,31 +66,36 @@ async def fetch_keywords_for_keywords(
     keywords_param = [(kw.strip()) for kw in seed_parts[:10] if (kw or "").strip()]
     if not keywords_param:
         return [], None
-    params = [("country", cc)]
-    for kw in keywords_param:
-        params.append(("keywords", kw))
+
+    def make_params(param_key: str, kws: list[str]) -> list[tuple[str, str]]:
+        """param_key: 'keywords' или 'keywords[]' (Rails vs их cURL в доке)."""
+        p = [("country", cc)]
+        for kw in kws:
+            p.append((param_key, kw))
+        return p
+
+    headers = {
+        "Authorization": f"{_AUTH_HEADER} {key_clean}",
+        "Accept": "application/json",
+        "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
+    }
+    r = None
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.get(
-            url,
-            params=params,
-            headers={
-                "Authorization": f"{_AUTH_HEADER} {key_clean}",
-                "Accept": "application/json",
-                "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
-            },
-        )
-        # При 500 пробуем один раз с одной ключевой фразой (иногда провайдер падает на нескольких)
+        # 1) Сначала пробуем keywords[] (Rails-массив)
+        params = make_params("keywords[]", keywords_param)
+        r = await client.get(url, params=params, headers=headers)
+        # 2) При 500 пробуем keywords без скобок (как в их доке cURL)
+        if r.status_code == 500:
+            params = make_params("keywords", keywords_param)
+            r = await client.get(url, params=params, headers=headers)
+        # 3) Всё ещё 500 и несколько фраз — пробуем одну фразу (keywords[])
         if r.status_code == 500 and len(keywords_param) > 1:
-            params_one = [("country", cc), ("keywords[]", keywords_param[0])]
-            r = await client.get(
-                url,
-                params=params_one,
-                headers={
-                    "Authorization": f"{_AUTH_HEADER} {key_clean}",
-                    "Accept": "application/json",
-                    "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
-                },
-            )
+            params_one = make_params("keywords[]", keywords_param[:1])
+            r = await client.get(url, params=params_one, headers=headers)
+        # 4) Всё ещё 500 — одна фраза с keywords (без скобок)
+        if r.status_code == 500:
+            params_one = make_params("keywords", keywords_param[:1])
+            r = await client.get(url, params=params_one, headers=headers)
     if r.status_code != 200:
         # Логируем заголовки ответа (cf-ray, x-request-id и т.д.) для отладки WAF/Cloudflare
         resp_headers = dict(r.headers) if r.headers else {}
@@ -109,6 +114,7 @@ async def fetch_keywords_for_keywords(
             "http_status": r.status_code,
             "response_preview": (r.text or "")[:500],
             "api_error": err_msg,
+            "response_headers": dict(r.headers) if r.headers else None,
         }
         return [], debug
     data = r.json()
