@@ -196,7 +196,8 @@ async def fetch_keywords_for_keywords(
         keywords_seed = [seed_clean]
 
     body: dict[str, Any] = {
-        "keywordPlanNetwork": "GOOGLE_SEARCH",
+        "keywordPlanNetwork": "GOOGLE_SEARCH_AND_PARTNERS",
+        "includeAdultKeywords": False,
         "keywordSeed": {"keywords": keywords_seed},
         "geoTargetConstants": geoTargetConstants,
         "language": LANGUAGE_CONSTANT_EN,
@@ -225,6 +226,12 @@ async def fetch_keywords_for_keywords(
             err_msg = err_msg.get("message") or err_msg.get("status") or str(err_msg)
         else:
             err_msg = str(err_msg) if err_msg is not None else r.text[:300]
+        # Google API often returns error.details[].field with the invalid field path
+        details = err_body.get("error", {}).get("details") if isinstance(err_body.get("error"), dict) else []
+        if isinstance(details, list) and details and isinstance(details[0], dict):
+            field = details[0].get("field") or details[0].get("reason")
+            if field:
+                err_msg = f"{err_msg} (поле: {field})"
         debug = {
             "request_url": url,
             "http_status": r.status_code,
