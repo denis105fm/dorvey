@@ -58,7 +58,7 @@ async def fetch_keywords_for_keywords(
         return [], None
     cc = _country_code(country)  # всегда lowercase (us, ru), т.к. API требует
     url = f"{FETCHSERP_API_BASE}/api/v1/keywords_suggestions"
-    # keywords — только query params, повторяемый ключ keywords=... (не keyword=, не keywords[]=, не body)
+    # Rails (OasRails) ожидает массив через keywords[]; keywords=...&keywords=... парсится в строку → 500
     seed_parts = [s.strip() for s in seed_clean.split(",") if (s or "").strip() and len((s or "").strip()) >= 2]
     if not seed_parts:
         seed_parts = [seed_clean.strip()] if len(seed_clean.strip()) >= 2 else []
@@ -81,7 +81,7 @@ async def fetch_keywords_for_keywords(
         )
         # При 500 пробуем один раз с одной ключевой фразой (иногда провайдер падает на нескольких)
         if r.status_code == 500 and len(keywords_param) > 1:
-            params_one = [("country", cc), ("keywords", keywords_param[0])]
+            params_one = [("country", cc), ("keywords[]", keywords_param[0])]
             r = await client.get(
                 url,
                 params=params_one,
@@ -92,9 +92,11 @@ async def fetch_keywords_for_keywords(
                 },
             )
     if r.status_code != 200:
+        # Логируем заголовки ответа (cf-ray, x-request-id и т.д.) для отладки WAF/Cloudflare
+        resp_headers = dict(r.headers) if r.headers else {}
         logger.warning(
-            "FetchSERP keywords_suggestions: HTTP %s, url=%s body=%s",
-            r.status_code, r.url, (r.text or "")[:400],
+            "FetchSERP keywords_suggestions: HTTP %s, url=%s body=%s response_headers=%s",
+            r.status_code, r.url, (r.text or "")[:400], resp_headers,
         )
         err_msg = None
         try:

@@ -38,14 +38,14 @@
 
 ### Query-параметры (формат: query params, не JSON body)
 - `country` — **всегда в нижнем регистре** (us, ru). В коде UI может быть "US", сервис приводит через `_country_code()` к `us`.
-- `keywords` — повторяемый параметр: одна или несколько seed-фраз.  
-  Пример для одной фразы: `keywords=casual%20clicker%20game`.  
-  Для нескольких: `keywords=phrase1&keywords=phrase2`.  
+- `keywords[]` — массив seed-фраз (Rails ожидает именно `keywords[]`, иначе параметр парсится как строка и endpoint отдаёт 500).  
+  Пример для одной фразы: `keywords[]=casual%20clicker%20game`.  
+  Для нескольких: `keywords[]=phrase1&keywords[]=phrase2`.  
   Пустые/короткие части не отправляются (чтобы не провоцировать 500 на пустом вводе).
 
 **Пример полного URL запроса (без ключа):**
 ```
-https://www.fetchserp.com/api/v1/keywords_suggestions?country=us&keywords=casual+clicker+game
+https://www.fetchserp.com/api/v1/keywords_suggestions?country=us&keywords[]=casual+clicker+game
 ```
 (При необходимости в .env можно задать `FETCHSERP_API_BASE=https://api.fetchserp.com`.)
 
@@ -61,7 +61,7 @@ User-Agent: Dorvey/1.0 (+https://github.com/denis105fm/dorvey)
 **Нет.** Метод GET, тело запроса не передаётся.
 
 ### Как передаётся API key
-В **заголовке** `Authorization: Bearer <API_KEY>` (не в query, не в body).
+В **заголовке** `Authorization: bearer <API_KEY>` (не в query, не в body).
 
 ---
 
@@ -71,14 +71,14 @@ User-Agent: Dorvey/1.0 (+https://github.com/denis105fm/dorvey)
 url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
 params = [("country", cc)]   # cc = "us" для US
 for kw in seed_parts[:10]:
-    params.append(("keywords", kw))
+    params.append(("keywords[]", kw))
 
 async with httpx.AsyncClient(timeout=30.0) as client:
     r = await client.get(
         url,
         params=params,
         headers={
-            "Authorization": f"Bearer {key_clean}",
+            "Authorization": f"bearer {key_clean}",
             "Accept": "application/json",
             "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
         },
@@ -113,15 +113,15 @@ async with httpx.AsyncClient(timeout=30.0) as client:
 }
 ```
 
-**Фактически получаем:** HTTP **500 Internal Server Error** (тело обычно `Internal Server Error` или пустое).  
-При 500 в нашем коде в лог пишется: `request_url`, `response_preview` (первые 500 символов ответа).
+**Фактически получаем:** HTTP **500** — часто из-за передачи `keywords=...` вместо `keywords[]=...` (Rails парсит массив только из `keywords[]`).  
+При не-200 в лог пишется: `request_url`, `response_preview`, **response_headers** (cf-ray, x-request-id и т.д. для отладки WAF/Cloudflare).
 
 ---
 
 ## 6. Дополнительно: проверка ключа (не keywords_suggestions)
 
 **Endpoint:** `GET https://www.fetchserp.com/api/v1/user`  
-**Headers:** те же (`Authorization: Bearer <KEY>`, `Accept: application/json`, `User-Agent`).  
+**Headers:** те же (`Authorization: bearer <KEY>`, `Accept: application/json`, `User-Agent`).  
 **Body:** нет.  
 Этот запрос выполняется при нажатии «Проверить» в Настройках и возвращает **200** с информацией о кредитах — то есть ключ принимается.
 
@@ -130,7 +130,7 @@ async with httpx.AsyncClient(timeout=30.0) as client:
 ## 7. Кратко для support@fetchserp.com
 
 - **Endpoint:** `GET /api/v1/keywords_suggestions`
-- **Параметры:** `country=us`, `keywords=casual clicker game` (в query string).
+- **Параметры:** `country=us`, `keywords[]=casual clicker game` (в query string; Rails ожидает массив через `keywords[]`).
 - **Авторизация:** заголовок `Authorization: Bearer <API_KEY>`.
 - **Результат:** HTTP 500 Internal Server Error, ключ валидный (GET /api/v1/user возвращает 200).
 - Нужно: понять причину 500 для этого запроса (формат параметров, лимиты, ошибка на стороне сервера).
