@@ -114,13 +114,13 @@ def _fetch_keywords_via_official_client(
         "refresh_token": refresh_token,
         "use_proto_plus": True,
     }
-    # login_customer_id не задаём — для одиночного аккаунта это может вызывать 400
-
-    client = GoogleAdsClient.load_from_dict(config)
     use_customer_id = _normalize_customer_id(customer_id) or ""
     if not use_customer_id:
         raise ValueError("customer_id required for official client")
+    # Для доступа через MCC (менеджер) нужен login_customer_id; для одного аккаунта тот же id
+    config["login_customer_id"] = use_customer_id
 
+    client = GoogleAdsClient.load_from_dict(config)
     geo_id = _country_to_geo_id(country)
     keywords_seed = [s.strip() for s in seed.split(",") if (s or "").strip()][:10]
     if not keywords_seed:
@@ -268,6 +268,25 @@ async def fetch_keywords_for_keywords(
     except ImportError:
         logger.debug("google-ads library not available, using REST")
     except Exception as e:
+        # Пробрасываем ошибки API Google с текстом и полем — показываем пользователю, не переходим на REST
+        err_name = type(e).__name__
+        if err_name == "GoogleAdsException":
+            err_msg = str(e)
+            details = []
+            if hasattr(e, "failure") and e.failure and hasattr(e.failure, "errors"):
+                for err in e.failure.errors:
+                    details.append(err.message or "")
+                    if getattr(err, "location", None) and getattr(err.location, "field_path_elements", None):
+                        for fp in err.location.field_path_elements:
+                            details.append(f"  поле: {getattr(fp, 'field_name', fp)}")
+            msg = err_msg[:300]
+            if details:
+                msg += "\n" + "\n".join(details[:15])
+            return [], {
+                "message": msg,
+                "api_error": err_msg[:500],
+                "api_error_details": details[:20] if details else None,
+            }
         logger.warning("Google Ads official client failed, using REST: %s", e)
 
     # Fallback: REST API
