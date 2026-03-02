@@ -37,6 +37,9 @@ paramiko==3.4.0
 google-api-python-client==2.116.0
 google-auth==2.27.0
 
+# Google Ads API (официальный клиент для подсказок ключей)
+google-ads==24.1.0
+
 # ML
 scikit-learn==1.4.0
 xgboost>=2.0.0

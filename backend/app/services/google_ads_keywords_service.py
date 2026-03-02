@@ -5,6 +5,7 @@
 Документация: https://developers.google.com/google-ads/api/docs/keyword-planning/generate-keyword-ideas
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -87,6 +88,75 @@ async def validate_google_ads_credentials(creds: dict) -> tuple[bool, str]:
 def _normalize_customer_id(customer_id: str) -> str:
     """Убирает дефисы: 123-456-7890 -> 1234567890."""
     return (customer_id or "").replace("-", "").strip()
+
+
+def _fetch_keywords_via_official_client(
+    developer_token: str,
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    customer_id: str,
+    seed: str,
+    country: str,
+    limit: int,
+) -> tuple[list[dict], dict[str, Any] | None]:
+    """
+    Синхронный вызов через официальную библиотеку google-ads.
+    Возвращает (list of {keyword, volume, cpc}, debug или None).
+    При любой ошибке выбрасывает исключение — тогда вызывающий сделает fallback на REST.
+    """
+    from google.ads.googleads.client import GoogleAdsClient
+
+    config: dict[str, Any] = {
+        "developer_token": developer_token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "use_proto_plus": True,
+    }
+    # login_customer_id не задаём — для одиночного аккаунта это может вызывать 400
+
+    client = GoogleAdsClient.load_from_dict(config)
+    use_customer_id = _normalize_customer_id(customer_id) or ""
+    if not use_customer_id:
+        raise ValueError("customer_id required for official client")
+
+    geo_id = _country_to_geo_id(country)
+    keywords_seed = [s.strip() for s in seed.split(",") if (s or "").strip()][:10]
+    if not keywords_seed:
+        keywords_seed = [seed.strip()]
+
+    keyword_plan_service = client.get_service("KeywordPlanIdeaService")
+    google_ads_service = client.get_service("GoogleAdsService")
+    geo_service = client.get_service("GeoTargetConstantService")
+    language_rn = google_ads_service.language_constant_path("1000")
+    geo_rn = geo_service.geo_target_constant_path(str(geo_id))
+
+    request = client.get_type("GenerateKeywordIdeasRequest")
+    request.customer_id = use_customer_id
+    request.language = language_rn
+    request.geo_target_constants.append(geo_rn)
+    request.keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
+    request.include_adult_keywords = False
+    request.keyword_seed.keywords.extend(keywords_seed)
+
+    response = keyword_plan_service.generate_keyword_ideas(request=request)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for idea in response:
+        text = (idea.text or "").strip()
+        if not text or text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        metrics = idea.keyword_idea_metrics
+        vol = int(metrics.avg_monthly_searches) if metrics else 0
+        low = getattr(metrics, "low_top_of_page_bid_micros", None) or 0
+        high = getattr(metrics, "high_top_of_page_bid_micros", None) or 0
+        cpc = (int(low) + int(high)) / 2 / 1_000_000
+        out.append({"keyword": text, "volume": vol, "cpc": round(cpc, 4)})
+        if len(out) >= limit:
+            break
+    return out, None if out else {"message": "Google Ads не вернул идей по запросу."}
 
 
 async def _list_accessible_customers(
@@ -181,6 +251,26 @@ async def fetch_keywords_for_keywords(
     if not use_customer_id:
         return [], {"message": "Нет доступного рекламного аккаунта Google Ads."}
 
+    # Сначала пробуем официальную библиотеку google-ads (корректный формат запроса)
+    try:
+        out, debug = await asyncio.to_thread(
+            _fetch_keywords_via_official_client,
+            dev,
+            cid,
+            secret,
+            refresh,
+            use_customer_id,
+            seed_clean,
+            country,
+            min(limit, 100),
+        )
+        return out, debug
+    except ImportError:
+        logger.debug("google-ads library not available, using REST")
+    except Exception as e:
+        logger.warning("Google Ads official client failed, using REST: %s", e)
+
+    # Fallback: REST API
     geo_id = _country_to_geo_id(country)
     geoTargetConstants = [f"geoTargetConstants/{geo_id}"]
 
@@ -191,21 +281,24 @@ async def fetch_keywords_for_keywords(
         "developer-token": dev,
         "Content-Type": "application/json",
     }
-    # login-customer-id: в примерах REST указан как обязательный (MCC или тот же аккаунт)
-    headers["login-customer-id"] = use_customer_id
+    # login-customer-id только для MCC: когда в настройках указан customer_id и он не совпадает с первым из list (т.е. это менеджер)
+    # Для обычного аккаунта не отправляем — иначе API может вернуть 400
+    if customer_id:
+        normalized_input = _normalize_customer_id(customer_id)
+        if normalized_input and normalized_input != use_customer_id:
+            headers["login-customer-id"] = normalized_input
     keywords_seed = [s.strip() for s in seed_clean.split(",") if (s or "").strip()][:10]
     if not keywords_seed:
         keywords_seed = [seed_clean]
 
     body: dict[str, Any] = {
-        "keywordPlanNetwork": "GOOGLE_SEARCH_AND_PARTNERS",
+        "keywordPlanNetwork": "GOOGLE_SEARCH",
         "includeAdultKeywords": False,
         "keywordSeed": {"keywords": keywords_seed},
         "geoTargetConstants": geoTargetConstants,
         "language": LANGUAGE_CONSTANT_EN,
     }
-    # pageSize: не все версии REST принимают; ограничиваем 100 при необходимости
-    body["pageSize"] = min(max(limit, 1), 100)
+    # pageSize не передаём — убираем возможную причину 400
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -240,6 +333,7 @@ async def fetch_keywords_for_keywords(
             "http_status": r.status_code,
             "response_preview": (r.text or "")[:500],
             "api_error": err_msg,
+            "request_body_preview": str(body)[:400],
         }
         return [], debug
 
