@@ -201,8 +201,9 @@ async def fetch_keywords_for_keywords(
         "keywordSeed": {"keywords": keywords_seed},
         "geoTargetConstants": geoTargetConstants,
         "language": LANGUAGE_CONSTANT_EN,
-        "pageSize": min(max(limit, 1), 1000),
     }
+    # pageSize: не все версии REST принимают; ограничиваем 100 при необходимости
+    body["pageSize"] = min(max(limit, 1), 100)
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:

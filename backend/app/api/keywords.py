@@ -379,20 +379,24 @@ async def auto_pull_and_import(
     if not creds:
         raise HTTPException(status_code=400, detail="Настройте провайдера подсказки ключей в Настройках.")
     provider, c = creds
-    if provider == "dataforseo":
-        keywords = await dataforseo_fetch(
-            c["login"], c["password"],
-            seed=data.seed, country=data.country, limit=data.limit,
-        )
-        fetchserp_debug = None
-    elif provider == "fetchserp":
-        keywords, fetchserp_debug = await fetchserp_fetch(c["api_key"], seed=data.seed, country=data.country, limit=data.limit)
-    else:
-        keywords, fetchserp_debug = await google_ads_fetch(
-            c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
-            seed=data.seed, country=data.country, limit=data.limit,
-            customer_id=c.get("customer_id"),
-        )
+    fetchserp_debug = None
+    try:
+        if provider == "dataforseo":
+            keywords = await dataforseo_fetch(
+                c["login"], c["password"],
+                seed=data.seed, country=data.country, limit=data.limit,
+            )
+        elif provider == "fetchserp":
+            keywords, fetchserp_debug = await fetchserp_fetch(c["api_key"], seed=data.seed, country=data.country, limit=data.limit)
+        else:
+            keywords, fetchserp_debug = await google_ads_fetch(
+                c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
+                seed=data.seed, country=data.country, limit=data.limit,
+                customer_id=c.get("customer_id"),
+            )
+    except Exception as e:
+        keywords = []
+        fetchserp_debug = {"message": str(e)[:200], "api_error": str(e)[:300]}
 
     existing_r = await db.execute(select(Keyword.keyword).where(Keyword.campaign_id == data.campaign_id))
     existing_lower = {row[0].lower() for row in existing_r.all() if row[0]}
@@ -435,6 +439,9 @@ async def auto_pull_and_import(
                 msg = f"HTTP {fetchserp_debug.get('http_status')}: {msg}".strip()
             if msg:
                 result["hint"] = msg
+        elif fetchserp_debug and (fetchserp_debug.get("api_error") or fetchserp_debug.get("message")):
+            result["debug"] = fetchserp_debug
+            result["hint"] = fetchserp_debug.get("message") or fetchserp_debug.get("api_error", "")[:300]
     elif len(created) == 0 and keywords:
         result["hint"] = "Все подтянутые ключи уже есть в кампании."
     return result
