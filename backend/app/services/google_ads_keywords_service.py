@@ -117,8 +117,7 @@ def _fetch_keywords_via_official_client(
     use_customer_id = _normalize_customer_id(customer_id) or ""
     if not use_customer_id:
         raise ValueError("customer_id required for official client")
-    # Для доступа через MCC (менеджер) нужен login_customer_id; для одного аккаунта тот же id
-    config["login_customer_id"] = use_customer_id
+    # login_customer_id не ставим — для одиночного аккаунта даёт 400 Invalid argument
 
     client = GoogleAdsClient.load_from_dict(config)
     geo_id = _country_to_geo_id(country)
@@ -136,7 +135,7 @@ def _fetch_keywords_via_official_client(
     request.customer_id = use_customer_id
     request.language = language_rn
     request.geo_target_constants.append(geo_rn)
-    request.keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH_AND_PARTNERS
+    request.keyword_plan_network = client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH
     request.include_adult_keywords = False
     request.keyword_seed.keywords.extend(keywords_seed)
 
@@ -268,17 +267,20 @@ async def fetch_keywords_for_keywords(
     except ImportError:
         logger.debug("google-ads library not available, using REST")
     except Exception as e:
-        # Пробрасываем ошибки API Google с текстом и полем — показываем пользователю, не переходим на REST
+        # Ошибки API Google — показываем пользователю, на REST не переходим (REST даёт 400)
         err_name = type(e).__name__
         if err_name == "GoogleAdsException":
+            logger.warning("GoogleAdsException: %s", e)
             err_msg = str(e)
             details = []
             if hasattr(e, "failure") and e.failure and hasattr(e.failure, "errors"):
                 for err in e.failure.errors:
-                    details.append(err.message or "")
-                    if getattr(err, "location", None) and getattr(err.location, "field_path_elements", None):
-                        for fp in err.location.field_path_elements:
-                            details.append(f"  поле: {getattr(fp, 'field_name', fp)}")
+                    details.append(getattr(err, "message", str(err)) or "")
+                    loc = getattr(err, "location", None)
+                    if loc:
+                        path_elts = getattr(loc, "field_path_elements", None) or []
+                        for fp in (path_elts or []):
+                            details.append("  поле: " + str(getattr(fp, "field_name", fp)))
             msg = err_msg[:300]
             if details:
                 msg += "\n" + "\n".join(details[:15])
@@ -287,9 +289,13 @@ async def fetch_keywords_for_keywords(
                 "api_error": err_msg[:500],
                 "api_error_details": details[:20] if details else None,
             }
-        logger.warning("Google Ads official client failed, using REST: %s", e)
+        # Любая другая ошибка официального клиента — возвращаем как есть, REST не вызываем
+        return [], {
+            "message": f"Ошибка Google Ads API: {err_name}: {str(e)[:250]}",
+            "api_error": str(e)[:500],
+        }
 
-    # Fallback: REST API
+    # Fallback: REST API (только если библиотека google-ads не установлена)
     geo_id = _country_to_geo_id(country)
     geoTargetConstants = [f"geoTargetConstants/{geo_id}"]
 
