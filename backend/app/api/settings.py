@@ -1,12 +1,13 @@
 """Settings API."""
 
 import json
+import secrets
 from datetime import datetime, timedelta
 from typing import Any, Optional
 from urllib.parse import urlencode, urlparse, quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -19,6 +20,8 @@ from app.core.database import get_db
 from app.models.setting import Setting
 
 router = APIRouter()
+
+GOOGLE_ADS_OAUTH_SCOPE = "https://www.googleapis.com/auth/adwords"
 
 INTEGRATION_KEYS = [
     "openai_api_key",
@@ -227,20 +230,36 @@ async def test_openai_key(data: TestOpenAIRequest, current_user: CurrentUser):
 async def test_external_api(
     data: TestExternalApiRequest,
     current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     """Test external news API key. Returns ok/error and sample headlines count."""
     src = (data.source or "").lower().strip()
     key = (data.api_key or "").strip()
     country = (data.country or "us").lower()[:2]
-    if not key:
-        raise HTTPException(400, "Укажите API ключ")
-    allowed = ("newsapi", "gnews", "mediastack", "guardian", "fetchserp", "bing", "clarity", "hotjar")
+    allowed = ("newsapi", "gnews", "mediastack", "guardian", "fetchserp", "bing", "clarity", "hotjar", "google_ads")
     if src not in allowed:
         raise HTTPException(400, f"Источник должен быть: {', '.join(allowed)}")
 
     result: dict = {"ok": False, "source": src, "message": ""}
 
-    if src == "bing":
+    if src == "google_ads":
+        from app.services.settings_helpers import get_keyword_provider_credentials
+        from app.services.google_ads_keywords_service import validate_google_ads_credentials
+        creds = await get_keyword_provider_credentials(db, current_user.id)
+        if not creds or creds[0] != "google_ads":
+            result["message"] = "Выберите провайдер Google Ads и заполните Developer Token, Client ID, Client Secret и Refresh Token, затем сохраните."
+            return result
+        try:
+            ok, message = await validate_google_ads_credentials(creds[1])
+            result["ok"] = ok
+            result["message"] = message or "Ошибка проверки"
+        except Exception as e:
+            result["ok"] = False
+            result["message"] = (str(e)[:200]) or "Ошибка проверки"
+        return result
+
+    if not key:
+        raise HTTPException(400, "Укажите API ключ")
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(
@@ -360,6 +379,140 @@ async def test_external_api(
     except Exception as e:
         result["message"] = str(e)[:200]
     return result
+
+
+class GoogleAdsOAuthStartRequest(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+@router.post("/google-ads-oauth-start")
+async def google_ads_oauth_start(
+    request: Request,
+    data: GoogleAdsOAuthStartRequest,
+    current_user: CurrentUser,
+):
+    """
+    Начать OAuth для Google Ads: вернуть URL для перехода в Google.
+    После авторизации callback сохранит refresh_token в настройки пользователя.
+    """
+    cid = (data.client_id or "").strip()
+    secret = (data.client_secret or "").strip()
+    if not cid or not secret:
+        raise HTTPException(400, "Введите Client ID и Client Secret")
+    base = _gsc_base_url(request)
+    redirect_uri = f"{base}/api/settings/google-ads-oauth-callback"
+    state = secrets.token_urlsafe(32)
+    payload = {"user_id": current_user.id, "client_id": cid, "client_secret": secret}
+    try:
+        import redis.asyncio as redis
+        r = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        await r.setex(f"google_ads_oauth:{state}", 600, json.dumps(payload))
+        await r.aclose()
+    except Exception as e:
+        raise HTTPException(503, f"Сервис временно недоступен ({e})")
+    params = {
+        "client_id": cid,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": GOOGLE_ADS_OAUTH_SCOPE,
+        "state": state,
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+    return {"url": url}
+
+
+@router.get("/google-ads-oauth-callback", response_class=HTMLResponse)
+async def google_ads_oauth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Callback после авторизации в Google: обмен code на refresh_token и сохранение.
+    Возвращает HTML с postMessage для закрытия окна и обновления настроек.
+    """
+    base = _gsc_base_url(request)
+    if error or not code or not state:
+        html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        <p>Ошибка авторизации. Закройте окно.</p>
+        <script>try { if (window.opener) window.opener.postMessage({ type: "google_ads_refresh_error" }, "*"); } catch(e){} window.close();</script>
+        </body></html>"""
+        return HTMLResponse(html)
+    try:
+        import redis.asyncio as redis
+        r = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        raw = await r.get(f"google_ads_oauth:{state}")
+        await r.delete(f"google_ads_oauth:{state}")
+        await r.aclose()
+    except Exception:
+        raw = None
+    if not raw:
+        html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        <p>Сессия истекла. Повторите «Получить refresh token».</p>
+        <script>try { if (window.opener) window.opener.postMessage({ type: "google_ads_refresh_error" }, "*"); } catch(e){} window.close();</script>
+        </body></html>"""
+        return HTMLResponse(html)
+    try:
+        payload = json.loads(raw)
+        user_id = int(payload.get("user_id", 0))
+        cid = (payload.get("client_id") or "").strip()
+        secret = (payload.get("client_secret") or "").strip()
+    except (json.JSONDecodeError, ValueError, TypeError):
+        user_id = 0
+        cid = secret = ""
+    if not user_id or not cid or not secret:
+        html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        <p>Ошибка данных. Закройте окно.</p>
+        <script>try { if (window.opener) window.opener.postMessage({ type: "google_ads_refresh_error" }, "*"); } catch(e){} window.close();</script>
+        </body></html>"""
+        return HTMLResponse(html)
+    redirect_uri = f"{base}/api/settings/google-ads-oauth-callback"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": cid,
+                "client_secret": secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=10.0,
+        )
+    if resp.status_code != 200:
+        html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        <p>Не удалось обменять код на токен. Закройте окно и попробуйте снова.</p>
+        <script>try { if (window.opener) window.opener.postMessage({ type: "google_ads_refresh_error" }, "*"); } catch(e){} window.close();</script>
+        </body></html>"""
+        return HTMLResponse(html)
+    data = resp.json()
+    refresh_token = data.get("refresh_token")
+    if not refresh_token:
+        html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+        <p>Refresh token не получен. При авторизации выберите аккаунт и дайте доступ. Закройте окно и попробуйте снова.</p>
+        <script>try { if (window.opener) window.opener.postMessage({ type: "google_ads_refresh_error" }, "*"); } catch(e){} window.close();</script>
+        </body></html>"""
+        return HTMLResponse(html)
+    r = await db.execute(
+        select(Setting).where(Setting.user_id == user_id, Setting.key == "google_ads_refresh_token")
+    )
+    s = r.scalar_one_or_none()
+    if s:
+        s.value = refresh_token
+    else:
+        db.add(Setting(user_id=user_id, key="google_ads_refresh_token", value=refresh_token))
+    await db.commit()
+    html = """<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+    <p>Refresh token сохранён. Можно закрыть окно.</p>
+    <script>try { if (window.opener) window.opener.postMessage({ type: "google_ads_refresh_saved" }, "*"); } catch(e){} setTimeout(function() { window.close(); }, 1500);</script>
+    </body></html>"""
+    return HTMLResponse(html)
 
 
 GSC_SCOPE = "https://www.googleapis.com/auth/indexing"

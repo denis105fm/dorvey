@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import api from "../api/client";
-import { Webhook, Settings as SettingsIcon, Send, Search, Shield, BarChart3, MousePointer, Palette, Bot, CreditCard, Smartphone, CheckCircle } from "lucide-react";
+import { Webhook, Settings as SettingsIcon, Send, Search, Shield, BarChart3, MousePointer, Palette, Bot, CreditCard, Smartphone, CheckCircle, Eye, EyeOff } from "lucide-react";
 
 type IntegrationsData = {
   openai_api_key?: string | null;
@@ -87,6 +87,12 @@ export default function Settings() {
   const [clarityTestMessage, setClarityTestMessage] = useState("");
   const [hotjarTestStatus, setHotjarTestStatus] = useState<null | "checking" | "ok" | "error">(null);
   const [hotjarTestMessage, setHotjarTestMessage] = useState("");
+  const [googleAdsTestStatus, setGoogleAdsTestStatus] = useState<null | "checking" | "ok" | "error">(null);
+  const [googleAdsTestMessage, setGoogleAdsTestMessage] = useState("");
+  const [showGoogleAdsDevToken, setShowGoogleAdsDevToken] = useState(false);
+  const [showGoogleAdsSecret, setShowGoogleAdsSecret] = useState(false);
+  const [showGoogleAdsRefresh, setShowGoogleAdsRefresh] = useState(false);
+  const googleAdsPopupRef = useRef<Window | null>(null);
   const { data: integrationsData } = useQuery({
     queryKey: ["settings", "integrations"],
     queryFn: () => api.get<IntegrationsData>("/settings/integrations/all").then((r) => r.data),
@@ -113,6 +119,21 @@ export default function Settings() {
       toast.error(params.get("message") || "Не удалось получить Refresh Token");
       window.history.replaceState({}, "", window.location.pathname);
     }
+  }, [qc]);
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "google_ads_refresh_saved") {
+        toast.success("Refresh token сохранён");
+        qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+        if (googleAdsPopupRef.current) try { googleAdsPopupRef.current.close(); } catch (_) {}
+      } else if (e.data?.type === "google_ads_refresh_error") {
+        toast.error("Не удалось получить refresh token");
+        if (googleAdsPopupRef.current) try { googleAdsPopupRef.current.close(); } catch (_) {}
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, [qc]);
 
   const saveIntegrationsMut = useMutation({
@@ -588,18 +609,23 @@ export default function Settings() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 space-y-0">
                 <div className="md:col-span-2">
                   <p className="text-slate-500 text-xs mb-2">
-                    Документация: <a href="https://developers.google.com/google-ads/api/docs/keyword-planning/generate-keyword-ideas" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Keyword Plan Idea Service</a>. Нужны: Google Ads аккаунт, Developer Token, OAuth 2.0 (Client ID, Client Secret, Refresh Token).
+                    Документация: <a href="https://developers.google.com/google-ads/api/docs/keyword-planning/generate-keyword-ideas" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Keyword Plan Idea Service</a>. В Google Cloud Console добавь в OAuth-клиента redirect URI: <code className="bg-slate-700 px-1 rounded">https://ваш-бэкенд/api/settings/google-ads-oauth-callback</code>.
                   </p>
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Developer Token</label>
-                  <input
-                    type="password"
-                    value={integrations.google_ads_developer_token ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_developer_token: e.target.value }))}
-                    placeholder="Из Google Ads API Center"
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-                  />
+                  <div className="relative flex">
+                    <input
+                      type={showGoogleAdsDevToken ? "text" : "password"}
+                      value={integrations.google_ads_developer_token ?? ""}
+                      onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_developer_token: e.target.value }))}
+                      placeholder="Из Google Ads API Center"
+                      className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                    />
+                    <button type="button" onClick={() => setShowGoogleAdsDevToken((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white" title={showGoogleAdsDevToken ? "Скрыть" : "Показать"}>
+                      {showGoogleAdsDevToken ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Client ID (OAuth)</label>
@@ -612,23 +638,93 @@ export default function Settings() {
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Client Secret (OAuth)</label>
-                  <input
-                    type="password"
-                    value={integrations.google_ads_client_secret ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_client_secret: e.target.value }))}
-                    placeholder="GOCSPX-..."
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-                  />
+                  <div className="relative flex">
+                    <input
+                      type={showGoogleAdsSecret ? "text" : "password"}
+                      value={integrations.google_ads_client_secret ?? ""}
+                      onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_client_secret: e.target.value }))}
+                      placeholder="GOCSPX-..."
+                      className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                    />
+                    <button type="button" onClick={() => setShowGoogleAdsSecret((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white" title={showGoogleAdsSecret ? "Скрыть" : "Показать"}>
+                      {showGoogleAdsSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Refresh Token (OAuth)</label>
-                  <input
-                    type="password"
-                    value={integrations.google_ads_refresh_token ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_refresh_token: e.target.value }))}
-                    placeholder="1//..."
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
-                  />
+                  <div className="flex gap-2">
+                    <div className="relative flex flex-1">
+                      <input
+                        type={showGoogleAdsRefresh ? "text" : "password"}
+                        value={integrations.google_ads_refresh_token ?? ""}
+                        onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_refresh_token: e.target.value })); setGoogleAdsTestStatus(null); }}
+                        placeholder="1//..."
+                        className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                      />
+                      <button type="button" onClick={() => setShowGoogleAdsRefresh((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white" title={showGoogleAdsRefresh ? "Скрыть" : "Показать"}>
+                        {showGoogleAdsRefresh ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const cid = (integrations.google_ads_client_id ?? "").trim();
+                        const secret = (integrations.google_ads_client_secret ?? "").trim();
+                        if (!cid || !secret) { toast.error("Введите Client ID и Client Secret"); return; }
+                        try {
+                          const { data } = await api.post<{ url: string }>("/settings/google-ads-oauth-start", { client_id: cid, client_secret: secret });
+                          if (data?.url) {
+                            googleAdsPopupRef.current = window.open(data.url, "google_ads_oauth", "width=600,height=700");
+                          } else toast.error("Не получен URL");
+                        } catch (err: unknown) {
+                          const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+                          toast.error(msg || "Ошибка запуска OAuth");
+                        }
+                      }}
+                      className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 rounded-lg text-white text-sm whitespace-nowrap"
+                    >
+                      Получить refresh token
+                    </button>
+                  </div>
+                </div>
+                <div className="md:col-span-2 flex items-center gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      saveIntegrationsMut.mutate(integrations, {
+                        onSuccess: () => {
+                          setGoogleAdsTestStatus("checking");
+                          api.post("/settings/test-external-api", { source: "google_ads" })
+                            .then((r) => r.data as { ok: boolean; message: string })
+                            .then((data) => {
+                              setGoogleAdsTestStatus(data.ok ? "ok" : "error");
+                              setGoogleAdsTestMessage(data.message || "");
+                              toast[data.ok ? "success" : "error"](data.message);
+                            })
+                            .catch((e: { response?: { data?: { detail?: string } } }) => {
+                              setGoogleAdsTestStatus("error");
+                              const msg = e?.response?.data?.detail ?? "Ошибка сервера";
+                              setGoogleAdsTestMessage(msg);
+                              toast.error(msg);
+                            });
+                        },
+                        onError: () => toast.error("Сначала сохраните настройки"),
+                      });
+                    }}
+                    disabled={googleAdsTestStatus === "checking" || saveIntegrationsMut.isPending}
+                    className="px-4 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-1"
+                    title="Проверить подключение (refresh token)"
+                  >
+                    <CheckCircle size={16} />
+                    {googleAdsTestStatus === "checking" ? "Проверка…" : "Проверить"}
+                  </button>
+                  {googleAdsTestStatus === "ok" && (
+                    <p className="flex items-center gap-2 text-emerald-400 text-sm">Подключение успешно</p>
+                  )}
+                  {googleAdsTestStatus === "error" && googleAdsTestMessage && (
+                    <p className="flex items-center gap-2 text-red-400 text-sm">{googleAdsTestMessage}</p>
+                  )}
                 </div>
               </div>
             )}
