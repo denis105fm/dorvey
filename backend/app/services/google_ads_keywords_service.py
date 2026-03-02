@@ -119,11 +119,8 @@ def _fetch_keywords_via_official_client(
         raise ValueError("customer_id required for official client")
     # login_customer_id не ставим — для одиночного аккаунта даёт 400 Invalid argument
 
-    # Явная версия API: v17 содержит KeywordPlanIdeaService; v18 — нет
-    try:
-        client = GoogleAdsClient.load_from_dict(config, version="v17")
-    except TypeError:
-        client = GoogleAdsClient.load_from_dict(config)
+    # Версию API не задаём — используем default из библиотеки (совместимый с установленной google-ads)
+    client = GoogleAdsClient.load_from_dict(config)
     geo_id = _country_to_geo_id(country)
     keywords_seed = [s.strip() for s in seed.split(",") if (s or "").strip()][:10]
     if not keywords_seed:
