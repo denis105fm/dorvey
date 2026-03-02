@@ -186,8 +186,8 @@ async def generate_vapid_keys(
 
 
 class TestExternalApiRequest(BaseModel):
-    source: str  # newsapi, gnews, mediastack, guardian
-    api_key: str
+    source: str  # newsapi, gnews, mediastack, guardian, fetchserp, google_ads, ...
+    api_key: Optional[str] = None  # не нужен для google_ads (берётся из настроек)
     country: str = "us"
 
 
@@ -260,6 +260,8 @@ async def test_external_api(
 
     if not key:
         raise HTTPException(400, "Укажите API ключ")
+
+    if src == "bing":
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(
