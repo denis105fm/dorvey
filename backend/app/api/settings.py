@@ -418,7 +418,7 @@ async def google_ads_oauth_start(
         "scope": GOOGLE_ADS_OAUTH_SCOPE,
         "state": state,
         "access_type": "offline",
-        "prompt": "consent",
+        "prompt": "select_account consent",
     }
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
     return {"url": url}
