@@ -104,12 +104,13 @@ async def suggest_keywords_from_external(
     from app.services.settings_helpers import get_keyword_provider_credentials
     from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
     from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
+    from app.services.google_ads_keywords_service import fetch_keywords_for_keywords as google_ads_fetch
 
     creds = await get_keyword_provider_credentials(db, current_user.id)
     if not creds:
         raise HTTPException(
             status_code=400,
-            detail="Выберите провайдера подсказки ключей в Настройках → Интеграции и укажите данные для API (DataForSeo: логин и пароль, FetchSERP: API ключ).",
+            detail="Выберите провайдера подсказки ключей в Настройках → Интеграции и укажите данные для API (DataForSeo: логин и пароль, FetchSERP: API ключ, Google Ads: Developer Token + OAuth).",
         )
     provider, c = creds
     if provider == "dataforseo":
@@ -122,6 +123,13 @@ async def suggest_keywords_from_external(
     elif provider == "fetchserp":
         keywords, _ = await fetchserp_fetch(
             c["api_key"],
+            seed=data.seed,
+            country=data.country,
+            limit=data.limit,
+        )
+    elif provider == "google_ads":
+        keywords, _ = await google_ads_fetch(
+            c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
             seed=data.seed,
             country=data.country,
             limit=data.limit,
@@ -154,23 +162,24 @@ async def suggest_keywords_by_offers_geo(
     from app.services.settings_helpers import get_keyword_provider_credentials
     from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
     from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
+    from app.services.google_ads_keywords_service import fetch_keywords_for_keywords as google_ads_fetch
 
     creds = await get_keyword_provider_credentials(db, current_user.id)
     if not creds:
         raise HTTPException(status_code=400, detail="Выберите провайдера подсказки ключей в Настройках и укажите данные для API.")
     provider, c = creds
-    fetch_fn = dataforseo_fetch if provider == "dataforseo" else fetchserp_fetch
-    if provider == "dataforseo":
-        auth = (c["login"], c["password"])
-    else:
-        auth = c["api_key"]
     merged: dict[str, dict] = {}
     limit_per_geo = max(20, data.limit // len(geos))
     for country in geos[:5]:
         if provider == "dataforseo":
-            kws = await fetch_fn(auth[0], auth[1], seed=data.seed, country=country, limit=limit_per_geo)
+            kws = await dataforseo_fetch(c["login"], c["password"], seed=data.seed, country=country, limit=limit_per_geo)
+        elif provider == "fetchserp":
+            kws, _ = await fetchserp_fetch(c["api_key"], seed=data.seed, country=country, limit=limit_per_geo)
         else:
-            kws, _ = await fetch_fn(auth, seed=data.seed, country=country, limit=limit_per_geo)
+            kws, _ = await google_ads_fetch(
+                c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
+                seed=data.seed, country=country, limit=limit_per_geo,
+            )
         for kw in kws:
             key_lower = kw["keyword"].lower()
             if key_lower not in merged or (kw.get("volume", 0) or 0) > (merged[key_lower].get("volume") or 0):
@@ -284,6 +293,7 @@ async def fetch_startup_keywords(
     from app.services.settings_helpers import get_keyword_provider_credentials
     from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
     from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
+    from app.services.google_ads_keywords_service import fetch_keywords_for_keywords as google_ads_fetch
 
     creds = await get_keyword_provider_credentials(db, current_user.id)
     if not creds:
@@ -292,21 +302,20 @@ async def fetch_startup_keywords(
             detail="Выберите провайдера подсказки ключей в Настройках и укажите API данные.",
         )
     provider, c = creds
-    fetch_fn = dataforseo_fetch if provider == "dataforseo" else fetchserp_fetch
-    if provider == "dataforseo":
-        auth = (c["login"], c["password"])
-    else:
-        auth = c["api_key"]
-
     merged: dict[str, dict] = {}
     for seed in (data.seeds or [])[:10]:
         seed = (seed or "").strip()
         if not seed:
             continue
         if provider == "dataforseo":
-            kws = await fetch_fn(auth[0], auth[1], seed=seed, country=data.country, limit=data.limit_per_seed)
+            kws = await dataforseo_fetch(c["login"], c["password"], seed=seed, country=data.country, limit=data.limit_per_seed)
+        elif provider == "fetchserp":
+            kws, _ = await fetchserp_fetch(c["api_key"], seed=seed, country=data.country, limit=data.limit_per_seed)
         else:
-            kws, _ = await fetch_fn(auth, seed=seed, country=data.country, limit=data.limit_per_seed)
+            kws, _ = await google_ads_fetch(
+                c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
+                seed=seed, country=data.country, limit=data.limit_per_seed,
+            )
         for kw in kws:
             key_lower = kw["keyword"].lower()
             if key_lower not in merged or (kw.get("volume") or 0) > (merged[key_lower].get("volume") or 0):
@@ -361,6 +370,7 @@ async def auto_pull_and_import(
     from app.services.settings_helpers import get_keyword_provider_credentials
     from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
     from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
+    from app.services.google_ads_keywords_service import fetch_keywords_for_keywords as google_ads_fetch
 
     creds = await get_keyword_provider_credentials(db, current_user.id)
     if not creds:
@@ -372,8 +382,13 @@ async def auto_pull_and_import(
             seed=data.seed, country=data.country, limit=data.limit,
         )
         fetchserp_debug = None
-    else:
+    elif provider == "fetchserp":
         keywords, fetchserp_debug = await fetchserp_fetch(c["api_key"], seed=data.seed, country=data.country, limit=data.limit)
+    else:
+        keywords, fetchserp_debug = await google_ads_fetch(
+            c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
+            seed=data.seed, country=data.country, limit=data.limit,
+        )
 
     existing_r = await db.execute(select(Keyword.keyword).where(Keyword.campaign_id == data.campaign_id))
     existing_lower = {row[0].lower() for row in existing_r.all() if row[0]}
@@ -406,6 +421,9 @@ async def auto_pull_and_import(
                     result["hint"] += f" Ошибка API (HTTP {fetchserp_debug.get('http_status')}): {err}"
                 if fetchserp_debug.get("http_status") == 500:
                     result["hint"] += " Ошибка на стороне FetchSERP — попробуйте позже или напишите в support@fetchserp.com."
+        elif provider == "google_ads" and fetchserp_debug and fetchserp_debug.get("message"):
+            result["debug"] = fetchserp_debug
+            result["hint"] = fetchserp_debug["message"]
     elif len(created) == 0 and keywords:
         result["hint"] = "Все подтянутые ключи уже есть в кампании."
     return result

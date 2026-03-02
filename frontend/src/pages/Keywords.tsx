@@ -134,7 +134,7 @@ export default function Keywords() {
 
       <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-800/50">
         <h2 className="text-lg font-medium text-white mb-3">Подтянуть из внешних источников</h2>
-        <p className="text-slate-400 text-sm mb-3">Ключи с объёмом по гео. Выберите провайдера (DataForSeo или FetchSERP) в <a href="/settings" className="text-emerald-400 hover:underline">Настройках → Интеграции</a>. Регистрация: <a href="https://app.dataforseo.com/register" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">DataForSeo</a>, <a href="https://www.fetchserp.com/app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">FetchSERP</a>.</p>
+        <p className="text-slate-400 text-sm mb-3">Ключи с объёмом по гео. Выберите провайдера (DataForSeo, FetchSERP или Google Ads API) в <a href="/settings" className="text-emerald-400 hover:underline">Настройках → Интеграции</a>. Регистрация: <a href="https://app.dataforseo.com/register" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">DataForSeo</a>, <a href="https://www.fetchserp.com/app" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">FetchSERP</a>, <a href="https://ads.google.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Google Ads</a>.</p>
         <div className="flex flex-wrap items-end gap-3 mb-3">
           <div>
             <label className="block text-slate-400 text-xs mb-1">Стартовый запрос (seed)</label>

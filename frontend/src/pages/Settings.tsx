@@ -42,6 +42,10 @@ type IntegrationsData = {
   dataforseo_password?: string | null;
   keyword_provider?: string | null;
   fetchserp_api_key?: string | null;
+  google_ads_developer_token?: string | null;
+  google_ads_client_id?: string | null;
+  google_ads_client_secret?: string | null;
+  google_ads_refresh_token?: string | null;
 };
 
 const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
@@ -488,10 +492,13 @@ export default function Settings() {
               >
                 <option value="dataforseo">DataForSeo — платный, для компаний (логин + пароль API)</option>
                 <option value="fetchserp">FetchSERP — 250 бесплатных кредитов, физлица (API ключ)</option>
+                <option value="google_ads">Google Ads API — подсказки и объём (Developer Token + OAuth)</option>
               </select>
               <p className="text-slate-500 text-xs mt-1">
                 {integrations.keyword_provider === "fetchserp"
                   ? "Подсказки ключей и объём по странам. Бесплатный старт на fetchserp.com, затем кредиты."
+                  : integrations.keyword_provider === "google_ads"
+                  ? "Официальный API Google: подсказки и объём поиска. Нужен аккаунт Google Ads, Developer Token и OAuth (client_id, client_secret, refresh_token)."
                   : "Большая база ключей по гео. Платный сервис, часто только для юрлиц (app.dataforseo.com)."}
               </p>
             </div>
@@ -575,6 +582,54 @@ export default function Settings() {
                     <span className="text-red-400">✕</span> {fetchserpTestMessage}
                   </p>
                 )}
+              </div>
+            )}
+            {(integrations.keyword_provider ?? "dataforseo") === "google_ads" && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 space-y-0">
+                <div className="md:col-span-2">
+                  <p className="text-slate-500 text-xs mb-2">
+                    Документация: <a href="https://developers.google.com/google-ads/api/docs/keyword-planning/generate-keyword-ideas" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Keyword Plan Idea Service</a>. Нужны: Google Ads аккаунт, Developer Token, OAuth 2.0 (Client ID, Client Secret, Refresh Token).
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-sm mb-1">Developer Token</label>
+                  <input
+                    type="password"
+                    value={integrations.google_ads_developer_token ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_developer_token: e.target.value }))}
+                    placeholder="Из Google Ads API Center"
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-sm mb-1">Client ID (OAuth)</label>
+                  <input
+                    value={integrations.google_ads_client_id ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_client_id: e.target.value }))}
+                    placeholder="xxx.apps.googleusercontent.com"
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-sm mb-1">Client Secret (OAuth)</label>
+                  <input
+                    type="password"
+                    value={integrations.google_ads_client_secret ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_client_secret: e.target.value }))}
+                    placeholder="GOCSPX-..."
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-sm mb-1">Refresh Token (OAuth)</label>
+                  <input
+                    type="password"
+                    value={integrations.google_ads_refresh_token ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_refresh_token: e.target.value }))}
+                    placeholder="1//..."
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                </div>
               </div>
             )}
             <p className="text-slate-500 text-xs">Подсказки ключей по объёму и гео: Ключевые слова → Подтянуть из внешних источников.</p>

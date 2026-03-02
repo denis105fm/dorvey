@@ -52,6 +52,10 @@ INTEGRATION_KEYS = [
     "dataforseo_password",
     "keyword_provider",
     "fetchserp_api_key",
+    "google_ads_developer_token",
+    "google_ads_client_id",
+    "google_ads_client_secret",
+    "google_ads_refresh_token",
 ]
 
 BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled", "external_data_enabled"}
@@ -101,8 +105,12 @@ class IntegrationsSettings(BaseModel):
     seasonality_data_url: Optional[str] = None
     dataforseo_login: Optional[str] = None
     dataforseo_password: Optional[str] = None
-    keyword_provider: Optional[str] = None  # dataforseo | fetchserp
+    keyword_provider: Optional[str] = None  # dataforseo | fetchserp | google_ads
     fetchserp_api_key: Optional[str] = None
+    google_ads_developer_token: Optional[str] = None
+    google_ads_client_id: Optional[str] = None
+    google_ads_client_secret: Optional[str] = None
+    google_ads_refresh_token: Optional[str] = None
 
 
 @router.get("/integrations/all")

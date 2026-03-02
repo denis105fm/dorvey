@@ -177,12 +177,12 @@ async def auto_create_campaign_from_offers(
     from app.services.settings_helpers import get_keyword_provider_credentials
     from app.services.dataforseo_service import fetch_keywords_for_keywords as dataforseo_fetch
     from app.services.fetchserp_service import fetch_keywords_for_keywords as fetchserp_fetch
+    from app.services.google_ads_keywords_service import fetch_keywords_for_keywords as google_ads_fetch
 
     creds = await get_keyword_provider_credentials(db, current_user.id)
     merged_kw: dict[str, dict] = {}
     if creds:
         provider, c = creds
-        fetch_fn = dataforseo_fetch if provider == "dataforseo" else fetchserp_fetch
         limit_per_geo = max(15, data.limit_keywords // len(geos))
         for country in geos[:5]:
             for seed in data.seed_keywords[:3]:
@@ -191,9 +191,14 @@ async def auto_create_campaign_from_offers(
                     continue
                 try:
                     if provider == "dataforseo":
-                        kws = await fetch_fn(c["login"], c["password"], seed=seed, country=country, limit=limit_per_geo)
+                        kws = await dataforseo_fetch(c["login"], c["password"], seed=seed, country=country, limit=limit_per_geo)
+                    elif provider == "fetchserp":
+                        kws, _ = await fetchserp_fetch(c["api_key"], seed=seed, country=country, limit=limit_per_geo)
                     else:
-                        kws, _ = await fetch_fn(c["api_key"], seed=seed, country=country, limit=limit_per_geo)
+                        kws, _ = await google_ads_fetch(
+                            c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
+                            seed=seed, country=country, limit=limit_per_geo,
+                        )
                     for kw in kws:
                         key_lower = kw["keyword"].lower()
                         if key_lower not in merged_kw or (kw.get("volume") or 0) > (merged_kw[key_lower].get("volume") or 0):
@@ -207,7 +212,7 @@ async def auto_create_campaign_from_offers(
             keyword=item["keyword"].strip(),
             volume=item.get("volume", 0),
             region=item.get("region"),
-            source="dataforseo" if creds and creds[0] == "dataforseo" else "fetchserp" if creds else None,
+            source=creds[0] if creds else None,
         ))
     await db.flush()
     # Опционально: дорвеи по топу ключей

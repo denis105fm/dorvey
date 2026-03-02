@@ -17,7 +17,7 @@ async def get_user_openai_key(db: AsyncSession, user_id: int) -> str | None:
     return s.value.strip()
 
 
-KEYWORD_PROVIDERS = ("dataforseo", "fetchserp")
+KEYWORD_PROVIDERS = ("dataforseo", "fetchserp", "google_ads")
 
 
 async def get_user_keyword_provider(db: AsyncSession, user_id: int) -> str:
@@ -28,6 +28,34 @@ async def get_user_keyword_provider(db: AsyncSession, user_id: int) -> str:
     s = r.scalar_one_or_none()
     val = (s.value or "").strip().lower() if s and s.value else ""
     return val if val in KEYWORD_PROVIDERS else "dataforseo"
+
+
+async def get_user_google_ads_credentials(db: AsyncSession, user_id: int) -> dict | None:
+    """Get Google Ads API credentials. Returns dict with developer_token, client_id, client_secret, refresh_token or None."""
+    r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == user_id,
+            Setting.key.in_([
+                "google_ads_developer_token",
+                "google_ads_client_id",
+                "google_ads_client_secret",
+                "google_ads_refresh_token",
+            ]),
+        )
+    )
+    rows = {s.key: (s.value or "").strip() for s in r.scalars().all()}
+    dev = rows.get("google_ads_developer_token", "")
+    cid = rows.get("google_ads_client_id", "")
+    secret = rows.get("google_ads_client_secret", "")
+    refresh = rows.get("google_ads_refresh_token", "")
+    if not dev or not cid or not secret or not refresh:
+        return None
+    return {
+        "developer_token": dev,
+        "client_id": cid,
+        "client_secret": secret,
+        "refresh_token": refresh,
+    }
 
 
 async def get_user_dataforseo_credentials(db: AsyncSession, user_id: int) -> tuple[str, str] | None:
@@ -65,4 +93,9 @@ async def get_keyword_provider_credentials(db: AsyncSession, user_id: int) -> tu
         if not api_key:
             return None
         return ("fetchserp", {"api_key": api_key})
+    if provider == "google_ads":
+        creds = await get_user_google_ads_credentials(db, user_id)
+        if not creds:
+            return None
+        return ("google_ads", creds)
     return None
