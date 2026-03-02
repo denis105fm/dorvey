@@ -292,7 +292,15 @@ async def fetch_keywords_for_keywords(
             }
         # Любая другая ошибка официального клиента — возвращаем как есть, REST не вызываем
         err_str = str(e)
-        if "test accounts" in err_str.lower() or "basic or standard access" in err_str.lower() or "permission_denied" in err_str.lower():
+        err_lower = err_str.lower()
+        is_permission_denied = (
+            "permission_denied" in err_lower
+            or "test accounts" in err_lower
+            or "basic or standard access" in err_lower
+            or ("developer token" in err_lower and "only approved" in err_lower)
+            or "statuscode.permission_denied" in err_lower
+        )
+        if is_permission_denied:
             return [], {
                 "message": "Developer Token разрешён только для тестовых аккаунтов. Чтобы подтягивать ключи из боевого аккаунта Google Ads, подайте заявку на Basic или Standard доступ: Google Ads → Инструменты → API Center.",
                 "api_error": err_str[:500],
