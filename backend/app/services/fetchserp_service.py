@@ -1,9 +1,14 @@
 """FetchSERP API service for keyword suggestions and volume."""
 
 import logging
+import os
+
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# API base URL: часто www — сайт, api — реальный API. При 500 на www пробуем api.
+FETCHSERP_API_BASE = os.getenv("FETCHSERP_API_BASE", "https://api.fetchserp.com").rstrip("/")
 
 # ISO country code (uppercase) -> FetchSERP country (lowercase, as in their API)
 COUNTRY_TO_FETCHSERP: dict[str, str] = {
@@ -50,7 +55,7 @@ async def fetch_keywords_for_keywords(
     if not seed_clean:
         return [], None
     cc = _country_code(country)  # всегда lowercase (us, ru), т.к. API требует
-    url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
+    url = f"{FETCHSERP_API_BASE}/api/v1/keywords_suggestions"
     # keywords — только query params, повторяемый ключ keywords=... (не keyword=, не keywords[]=, не body)
     seed_parts = [s.strip() for s in seed_clean.split(",") if (s or "").strip() and len((s or "").strip()) >= 2]
     if not seed_parts:
@@ -171,7 +176,7 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
     if not key:
         return False, "Укажите API ключ"
     # Лёгкий пинг: только Bearer, без параметров — проверяет ключ и доступ к API
-    url = "https://www.fetchserp.com/api/v1/user"
+    url = f"{FETCHSERP_API_BASE}/api/v1/user"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(

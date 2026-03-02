@@ -45,6 +45,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       DEBUG: "false"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      FETCHSERP_API_BASE: ${FETCHSERP_API_BASE:-https://api.fetchserp.com}
     depends_on:
       postgres:
         condition: service_healthy
