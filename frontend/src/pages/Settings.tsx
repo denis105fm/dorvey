@@ -46,6 +46,7 @@ type IntegrationsData = {
   google_ads_client_id?: string | null;
   google_ads_client_secret?: string | null;
   google_ads_refresh_token?: string | null;
+  google_ads_customer_id?: string | null;
 };
 
 const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
@@ -702,6 +703,17 @@ export default function Settings() {
                       </button>
                     </p>
                   )}
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-sm mb-1">Customer ID (необязательно)</label>
+                  <input
+                    type="text"
+                    value={integrations.google_ads_customer_id ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_customer_id: e.target.value }))}
+                    placeholder="123-456-7890"
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
+                  <p className="text-slate-500 text-xs mt-1">Для подсказок ключей используется этот рекламный аккаунт. Если пусто — берётся первый доступный.</p>
                 </div>
                 <div className="md:col-span-2 flex items-center gap-3 flex-wrap">
                   <button

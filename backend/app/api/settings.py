@@ -59,6 +59,7 @@ INTEGRATION_KEYS = [
     "google_ads_client_id",
     "google_ads_client_secret",
     "google_ads_refresh_token",
+    "google_ads_customer_id",
 ]
 
 BOOL_KEYS = {"ssl_auto_enabled", "exit_intent_enabled", "trust_elements_enabled", "click_tracking_enabled", "visitor_capture_enabled", "email_capture_enabled", "email_notifications_enabled", "external_data_enabled"}
@@ -114,6 +115,7 @@ class IntegrationsSettings(BaseModel):
     google_ads_client_id: Optional[str] = None
     google_ads_client_secret: Optional[str] = None
     google_ads_refresh_token: Optional[str] = None
+    google_ads_customer_id: Optional[str] = None  # опционально: 123-456-7890 (если не задан — берётся первый из listAccessibleCustomers)
 
 
 @router.get("/integrations/all")

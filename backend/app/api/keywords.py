@@ -133,6 +133,7 @@ async def suggest_keywords_from_external(
             seed=data.seed,
             country=data.country,
             limit=data.limit,
+            customer_id=c.get("customer_id"),
         )
     else:
         raise HTTPException(status_code=400, detail=f"Провайдер «{provider}» не поддерживается.")
@@ -179,6 +180,7 @@ async def suggest_keywords_by_offers_geo(
             kws, _ = await google_ads_fetch(
                 c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
                 seed=data.seed, country=country, limit=limit_per_geo,
+                customer_id=c.get("customer_id"),
             )
         for kw in kws:
             key_lower = kw["keyword"].lower()
@@ -315,6 +317,7 @@ async def fetch_startup_keywords(
             kws, _ = await google_ads_fetch(
                 c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
                 seed=seed, country=data.country, limit=data.limit_per_seed,
+                customer_id=c.get("customer_id"),
             )
         for kw in kws:
             key_lower = kw["keyword"].lower()
@@ -388,6 +391,7 @@ async def auto_pull_and_import(
         keywords, fetchserp_debug = await google_ads_fetch(
             c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
             seed=data.seed, country=data.country, limit=data.limit,
+            customer_id=c.get("customer_id"),
         )
 
     existing_r = await db.execute(select(Keyword.keyword).where(Keyword.campaign_id == data.campaign_id))
@@ -412,7 +416,7 @@ async def auto_pull_and_import(
         await db.refresh(k)
     result = {"imported": len(created), "source": provider, "keywords": [{"keyword": k.keyword, "volume": k.volume} for k in created]}
     if len(created) == 0 and not keywords:
-        result["hint"] = "Провайдер вернул 0 ключей. Проверьте Настройки → Интеграции (API ключ FetchSERP), попробуйте одну чёткую seed-фразу на английском, например: casual clicker game"
+        result["hint"] = "Провайдер вернул 0 ключей. Проверьте Настройки → Интеграции (API ключ FetchSERP или учётные данные Google Ads), попробуйте одну чёткую seed-фразу, например: casual clicker game"
         if provider == "fetchserp" and fetchserp_debug:
             result["debug"] = fetchserp_debug
             if fetchserp_debug.get("http_status") not in (None, 200):

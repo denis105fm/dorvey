@@ -40,6 +40,7 @@ async def get_user_google_ads_credentials(db: AsyncSession, user_id: int) -> dic
                 "google_ads_client_id",
                 "google_ads_client_secret",
                 "google_ads_refresh_token",
+                "google_ads_customer_id",
             ]),
         )
     )
@@ -48,14 +49,18 @@ async def get_user_google_ads_credentials(db: AsyncSession, user_id: int) -> dic
     cid = rows.get("google_ads_client_id", "")
     secret = rows.get("google_ads_client_secret", "")
     refresh = rows.get("google_ads_refresh_token", "")
+    customer_id = rows.get("google_ads_customer_id", "") or None
     if not dev or not cid or not secret or not refresh:
         return None
-    return {
+    out: dict = {
         "developer_token": dev,
         "client_id": cid,
         "client_secret": secret,
         "refresh_token": refresh,
     }
+    if customer_id:
+        out["customer_id"] = customer_id
+    return out
 
 
 async def get_user_dataforseo_credentials(db: AsyncSession, user_id: int) -> tuple[str, str] | None:

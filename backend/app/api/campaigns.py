@@ -198,6 +198,7 @@ async def auto_create_campaign_from_offers(
                         kws, _ = await google_ads_fetch(
                             c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
                             seed=seed, country=country, limit=limit_per_geo,
+                            customer_id=c.get("customer_id"),
                         )
                     for kw in kws:
                         key_lower = kw["keyword"].lower()
