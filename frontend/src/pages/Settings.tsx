@@ -93,6 +93,7 @@ export default function Settings() {
   const [showGoogleAdsSecret, setShowGoogleAdsSecret] = useState(false);
   const [showGoogleAdsRefresh, setShowGoogleAdsRefresh] = useState(false);
   const googleAdsPopupRef = useRef<Window | null>(null);
+  const [googleAdsRedirectUri, setGoogleAdsRedirectUri] = useState<string | null>(null);
   const { data: integrationsData } = useQuery({
     queryKey: ["settings", "integrations"],
     queryFn: () => api.get<IntegrationsData>("/settings/integrations/all").then((r) => r.data),
@@ -673,8 +674,9 @@ export default function Settings() {
                         const secret = (integrations.google_ads_client_secret ?? "").trim();
                         if (!cid || !secret) { toast.error("Введите Client ID и Client Secret"); return; }
                         try {
-                          const { data } = await api.post<{ url: string }>("/settings/google-ads-oauth-start", { client_id: cid, client_secret: secret });
+                          const { data } = await api.post<{ url: string; redirect_uri?: string }>("/settings/google-ads-oauth-start", { client_id: cid, client_secret: secret });
                           if (data?.url) {
+                            if (data.redirect_uri) setGoogleAdsRedirectUri(data.redirect_uri);
                             googleAdsPopupRef.current = window.open(data.url, "google_ads_oauth", "width=600,height=700");
                           } else toast.error("Не получен URL");
                         } catch (err: unknown) {
@@ -687,6 +689,19 @@ export default function Settings() {
                       Получить refresh token
                     </button>
                   </div>
+                  {googleAdsRedirectUri && (
+                    <p className="text-slate-500 text-xs mt-2 flex flex-wrap items-center gap-2">
+                      <span>При ошибке «redirect_uri_mismatch» добавь в Google Cloud Console → Credentials → OAuth-клиент → Authorized redirect URIs этот адрес:</span>
+                      <code className="bg-slate-700 px-2 py-1 rounded text-slate-300 break-all">{googleAdsRedirectUri}</code>
+                      <button
+                        type="button"
+                        onClick={() => { navigator.clipboard.writeText(googleAdsRedirectUri); toast.success("Скопировано"); }}
+                        className="text-emerald-400 hover:underline text-xs"
+                      >
+                        Копировать
+                      </button>
+                    </p>
+                  )}
                 </div>
                 <div className="md:col-span-2 flex items-center gap-3 flex-wrap">
                   <button

@@ -421,7 +421,7 @@ async def google_ads_oauth_start(
         "prompt": "select_account consent",
     }
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
-    return {"url": url}
+    return {"url": url, "redirect_uri": redirect_uri}
 
 
 @router.get("/google-ads-oauth-callback", response_class=HTMLResponse)
