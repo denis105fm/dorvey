@@ -7,8 +7,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# API base URL: часто www — сайт, api — реальный API. При 500 на www пробуем api.
-FETCHSERP_API_BASE = os.getenv("FETCHSERP_API_BASE", "https://api.fetchserp.com").rstrip("/")
+# API base URL по спецификации — https://www.fetchserp.com. api.fetchserp.com не резолвится (Name or service not known).
+FETCHSERP_API_BASE = os.getenv("FETCHSERP_API_BASE", "https://www.fetchserp.com").rstrip("/")
+# Спека: Authorization: bearer <token> (lowercase). Часть прокси/Rails ожидает строго bearer.
+_AUTH_HEADER = "bearer"
 
 # ISO country code (uppercase) -> FetchSERP country (lowercase, as in their API)
 COUNTRY_TO_FETCHSERP: dict[str, str] = {
@@ -72,7 +74,7 @@ async def fetch_keywords_for_keywords(
             url,
             params=params,
             headers={
-                "Authorization": f"Bearer {key_clean}",
+                "Authorization": f"{_AUTH_HEADER} {key_clean}",
                 "Accept": "application/json",
                 "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
             },
@@ -84,7 +86,7 @@ async def fetch_keywords_for_keywords(
                 url,
                 params=params_one,
                 headers={
-                    "Authorization": f"Bearer {key_clean}",
+                    "Authorization": f"{_AUTH_HEADER} {key_clean}",
                     "Accept": "application/json",
                     "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
                 },
@@ -182,7 +184,7 @@ async def validate_fetchserp_api_key(api_key: str) -> tuple[bool, str]:
             r = await client.get(
                 url,
                 headers={
-                    "Authorization": f"Bearer {key}",
+                    "Authorization": f"{_AUTH_HEADER} {key}",
                     "Accept": "application/json",
                     "User-Agent": "Dorvey/1.0 (+https://github.com/denis105fm/dorvey)",
                 },

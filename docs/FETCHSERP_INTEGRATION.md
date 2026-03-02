@@ -33,10 +33,8 @@
 **GET**
 
 ### URL (endpoint)
-Базовый URL задаётся переменной окружения **`FETCHSERP_API_BASE`** (по умолчанию `https://api.fetchserp.com`).  
-Раньше использовался `https://www.fetchserp.com` — на нём keywords_suggestions отдавал 500; api-поддомен часто используется для реального API.
-
-Полный URL запроса: `{FETCHSERP_API_BASE}/api/v1/keywords_suggestions`
+Базовый URL задаётся переменной **`FETCHSERP_API_BASE`** (по умолчанию `https://www.fetchserp.com` по спецификации).  
+Запрос: `{FETCHSERP_API_BASE}/api/v1/keywords_suggestions`
 
 ### Query-параметры (формат: query params, не JSON body)
 - `country` — **всегда в нижнем регистре** (us, ru). В коде UI может быть "US", сервис приводит через `_country_code()` к `us`.
@@ -47,13 +45,14 @@
 
 **Пример полного URL запроса (без ключа):**
 ```
-https://api.fetchserp.com/api/v1/keywords_suggestions?country=us&keywords=casual+clicker+game
+https://www.fetchserp.com/api/v1/keywords_suggestions?country=us&keywords=casual+clicker+game
 ```
-(При `FETCHSERP_API_BASE=https://www.fetchserp.com` будет www.)
+(При необходимости в .env можно задать `FETCHSERP_API_BASE=https://api.fetchserp.com`.)
 
 ### Headers
+По спецификации FetchSERP заголовок авторизации — **lowercase** `bearer` (не `Bearer`):
 ```
-Authorization: Bearer <API_KEY>
+Authorization: bearer <API_KEY>
 Accept: application/json
 User-Agent: Dorvey/1.0 (+https://github.com/denis105fm/dorvey)
 ```
