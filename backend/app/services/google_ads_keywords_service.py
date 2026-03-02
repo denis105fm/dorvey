@@ -291,9 +291,15 @@ async def fetch_keywords_for_keywords(
                 "api_error_details": details[:20] if details else None,
             }
         # Любая другая ошибка официального клиента — возвращаем как есть, REST не вызываем
+        err_str = str(e)
+        if "test accounts" in err_str.lower() or "basic or standard access" in err_str.lower() or "permission_denied" in err_str.lower():
+            return [], {
+                "message": "Developer Token разрешён только для тестовых аккаунтов. Чтобы подтягивать ключи из боевого аккаунта Google Ads, подайте заявку на Basic или Standard доступ: Google Ads → Инструменты → API Center.",
+                "api_error": err_str[:500],
+            }
         return [], {
-            "message": f"Ошибка Google Ads API: {err_name}: {str(e)[:250]}",
-            "api_error": str(e)[:500],
+            "message": f"Ошибка Google Ads API: {err_name}: {err_str[:250]}",
+            "api_error": err_str[:500],
         }
 
     # Fallback: REST API (только если библиотека google-ads не установлена)
