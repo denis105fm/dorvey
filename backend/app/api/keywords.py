@@ -425,9 +425,16 @@ async def auto_pull_and_import(
                     result["hint"] += f" Ошибка API (HTTP {fetchserp_debug.get('http_status')}): {err}"
                 if fetchserp_debug.get("http_status") == 500:
                     result["hint"] += " Ошибка на стороне FetchSERP — попробуйте позже или напишите в support@fetchserp.com."
-        elif provider == "google_ads" and fetchserp_debug and fetchserp_debug.get("message"):
+        elif provider == "google_ads" and fetchserp_debug:
             result["debug"] = fetchserp_debug
-            result["hint"] = fetchserp_debug["message"]
+            msg = fetchserp_debug.get("message") or ""
+            api_err = fetchserp_debug.get("api_error")
+            if api_err:
+                msg = f"{msg} {api_err}".strip() if msg else str(api_err)[:300]
+            if fetchserp_debug.get("http_status") not in (None, 200):
+                msg = f"HTTP {fetchserp_debug.get('http_status')}: {msg}".strip()
+            if msg:
+                result["hint"] = msg
     elif len(created) == 0 and keywords:
         result["hint"] = "Все подтянутые ключи уже есть в кампании."
     return result
