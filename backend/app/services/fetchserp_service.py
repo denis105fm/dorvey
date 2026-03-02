@@ -49,16 +49,18 @@ async def fetch_keywords_for_keywords(
     seed_clean = (seed or "").strip()[:200]
     if not seed_clean:
         return [], None
-    cc = _country_code(country)
+    cc = _country_code(country)  # всегда lowercase (us, ru), т.к. API требует
     url = "https://www.fetchserp.com/api/v1/keywords_suggestions"
-    # Передаём keywords без скобок (keywords=val1&keywords=val2). keywords[] давал HTTP 500 на стороне провайдера.
-    seed_parts = [s.strip() for s in seed_clean.split(",") if len(s.strip()) >= 2]
+    # keywords — только query params, повторяемый ключ keywords=... (не keyword=, не keywords[]=, не body)
+    seed_parts = [s.strip() for s in seed_clean.split(",") if (s or "").strip() and len((s or "").strip()) >= 2]
     if not seed_parts:
-        seed_parts = [seed_clean] if len(seed_clean) >= 2 else []
-    if not seed_parts:
+        seed_parts = [seed_clean.strip()] if len(seed_clean.strip()) >= 2 else []
+    # Не шлём запрос без валидных keywords — некоторые API на пустом вводе отдают 500
+    keywords_param = [(kw.strip()) for kw in seed_parts[:10] if (kw or "").strip()]
+    if not keywords_param:
         return [], None
     params = [("country", cc)]
-    for kw in seed_parts[:10]:
+    for kw in keywords_param:
         params.append(("keywords", kw))
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.get(
@@ -71,8 +73,8 @@ async def fetch_keywords_for_keywords(
             },
         )
         # При 500 пробуем один раз с одной ключевой фразой (иногда провайдер падает на нескольких)
-        if r.status_code == 500 and len(seed_parts) > 1:
-            params_one = [("country", cc), ("keywords", seed_parts[0])]
+        if r.status_code == 500 and len(keywords_param) > 1:
+            params_one = [("country", cc), ("keywords", keywords_param[0])]
             r = await client.get(
                 url,
                 params=params_one,
@@ -101,12 +103,13 @@ async def fetch_keywords_for_keywords(
         }
         return [], debug
     data = r.json()
-    # По официальной схеме: data.keywords_suggestions — массив с полями keyword, avg_monthly_searches, low_top_of_page_bid_micros, high_top_of_page_bid_micros
+    # Парсим оба формата: data.keywords_suggestions (офиц. док) и топ-уровень keywords_suggestions (публичные примеры)
     inner = data.get("data") if isinstance(data.get("data"), dict) else {}
     raw_list = (
         inner.get("keywords_suggestions")
         or inner.get("keywords")
         or (inner.get("data") if isinstance(inner.get("data"), list) else None)
+        or data.get("keywords_suggestions")
         or data.get("keyword_suggestions")
         or data.get("keywords")
         or (data.get("data") if isinstance(data.get("data"), list) else None)
