@@ -191,6 +191,8 @@ async def fetch_keywords_for_keywords(
         "developer-token": dev,
         "Content-Type": "application/json",
     }
+    # login-customer-id: в примерах REST указан как обязательный (MCC или тот же аккаунт)
+    headers["login-customer-id"] = use_customer_id
     keywords_seed = [s.strip() for s in seed_clean.split(",") if (s or "").strip()][:10]
     if not keywords_seed:
         keywords_seed = [seed_clean]
