@@ -1,6 +1,7 @@
 """Deploy API."""
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -47,6 +48,26 @@ class BatchDeployRequest(BaseModel):
     doorway_ids: list[int]
     min_delay_sec: float = 30
     max_delay_sec: float = 180
+
+
+@router.get("/doorway/{doorway_id}/preview", response_class=HTMLResponse)
+async def preview_doorway(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Вернуть HTML дорвея для предпросмотра (без деплоя)."""
+    r = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    if not r.first():
+        raise HTTPException(status_code=404, detail="Doorway not found")
+    html = await prepare_doorway_html(db, doorway_id, for_bot=False)
+    if not html:
+        raise HTTPException(status_code=500, detail="Could not prepare HTML")
+    return HTMLResponse(content=html)
 
 
 @router.post("/doorway/{doorway_id}")

@@ -9,7 +9,7 @@ import { Select } from "../components/ui/select";
 import { EmptyState } from "../components/ui/empty-state";
 import { Skeleton } from "../components/ui/skeleton";
 import { DropdownMenu, DropdownMenuItem } from "../components/ui/dropdown-menu";
-import { FileText, MoreVertical, ExternalLink, ChevronRight, ChevronLeft, Search, Layers, Plus, Check, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { FileText, MoreVertical, ExternalLink, ChevronRight, Search, Layers, Plus, Check, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 type Rec = { type: string; text: string };
 type ContentVariant = { title?: string; content?: string; meta_description?: string };
@@ -47,11 +47,12 @@ export default function Doorways() {
   const [filterDomain, setFilterDomain] = useState<string>("");
   const [filterProfit, setFilterProfit] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [page, setPage] = useState(1);
+  const [, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<"" | "health" | "revenue">("");
   const [cloneDoorwayId, setCloneDoorwayId] = useState<number | null>(null);
   const [cloneDomainId, setCloneDomainId] = useState<number>(0);
   const [clonePath, setClonePath] = useState("/");
+  const [selectedDoorwayIds, setSelectedDoorwayIds] = useState<Set<number>>(new Set());
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -123,6 +124,15 @@ export default function Doorways() {
       toast.success("Деплой выполнен");
     },
     onError: () => toast.error("Ошибка деплоя"),
+  });
+  const batchDeployMut = useMutation({
+    mutationFn: (doorway_ids: number[]) => api.post("/deploy/batch", { doorway_ids }).then((r) => r.data),
+    onSuccess: (data: { status?: string; task_id?: string; doorway_ids?: number[] }) => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      setSelectedDoorwayIds(new Set());
+      toast.success(`Деплой в очередь: ${data.doorway_ids?.length ?? 0} дорвеев. Обработка по очереди с задержкой.`);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка массового деплоя"),
   });
   const batchMut = useMutation({
     mutationFn: (items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]) =>
@@ -534,10 +544,40 @@ export default function Doorways() {
         />
       ) : (
         <div className="card-volumetric overflow-hidden">
-          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-280px)]">
+          {(() => {
+            const deployable = (paginated as Doorway[]).filter((d) => d.status !== "deployed" && d.status !== "indexed");
+            const selectedCount = selectedDoorwayIds.size;
+            const allDeployableSelected = deployable.length > 0 && deployable.every((d) => selectedDoorwayIds.has(d.id));
+            return (
+              <>
+                <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-slate-700 bg-slate-800/50">
+                  <label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={allDeployableSelected}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedDoorwayIds(new Set(deployable.map((d: Doorway) => d.id)));
+                        else setSelectedDoorwayIds(new Set());
+                      }}
+                      className="rounded border-slate-600 text-emerald-600"
+                    />
+                    Выбрать все для деплоя ({deployable.length})
+                  </label>
+                  {selectedCount > 0 && (
+                    <button
+                      onClick={() => batchDeployMut.mutate(Array.from(selectedDoorwayIds))}
+                      disabled={batchDeployMut.isPending}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm"
+                    >
+                      {batchDeployMut.isPending ? "Отправка…" : `Деплой выбранных (${selectedCount})`}
+                    </button>
+                  )}
+                </div>
+          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-320px)]">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-700">
+                  <th className="w-10 px-2 py-3"></th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">ID</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Кампания</th>
                   <th className="text-left px-4 py-3 text-slate-400 font-medium">Путь</th>
@@ -554,12 +594,26 @@ export default function Doorways() {
                   const profitStatus = metric?.profit_status ?? "no_traffic";
                   const profitLabel = profitStatus === "profitable" ? "Прибыльный" : profitStatus === "unprofitable" ? "Убыточный" : "Без трафика";
                   const profitColor = profitStatus === "profitable" ? "text-emerald-400" : profitStatus === "unprofitable" ? "text-amber-400" : "text-slate-500";
+                  const canDeploy = d.status !== "deployed" && d.status !== "indexed";
                   return (
                     <tr
                       key={d.id}
                       className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-all duration-200 animate-fade-in-up"
                       style={{ animationDelay: `${Math.min(idx * 40, 200)}ms` }}
                     >
+                      <td className="px-2 py-3">
+                        {canDeploy && (
+                          <input
+                            type="checkbox"
+                            checked={selectedDoorwayIds.has(d.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedDoorwayIds((s) => new Set([...s, d.id]));
+                              else setSelectedDoorwayIds((s) => { const n = new Set(s); n.delete(d.id); return n; });
+                            }}
+                            className="rounded border-slate-600 text-emerald-600"
+                          />
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-white font-mono text-sm">{d.id}</td>
                       <td className="px-4 py-3 text-slate-400">{campaignName(d.campaign_id)}</td>
                       <td className="px-4 py-3 text-white">{d.path || "/"}</td>
@@ -627,6 +681,18 @@ export default function Doorways() {
                             align="right"
                             trigger={<button className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white"><MoreVertical size={18} /></button>}
                           >
+                            <DropdownMenuItem
+                              onClick={() => {
+                                api.get(`/deploy/doorway/${d.id}/preview`, { responseType: "text" })
+                                  .then((res) => {
+                                    const w = window.open("", "_blank");
+                                    if (w) { w.document.write(res.data as string); w.document.close(); }
+                                  })
+                                  .catch(() => toast.error("Не удалось загрузить предпросмотр"));
+                              }}
+                            >
+                              Предпросмотр
+                            </DropdownMenuItem>
                             {d.status !== "deployed" && d.status !== "indexed" && (
                               <DropdownMenuItem onClick={() => setDeployDoorwayId(d.id)}>Деплой</DropdownMenuItem>
                             )}
@@ -655,6 +721,9 @@ export default function Doorways() {
           <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 text-slate-500 text-sm">
             <span>Всего: {filtered.length}</span>
           </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
