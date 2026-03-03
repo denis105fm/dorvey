@@ -76,6 +76,7 @@ async def generate_doorway(
     keyword: str,
     path: str = "/",
     generate_faq: bool = False,
+    generate_quiz: bool = False,
 ) -> dict:
     """
     Generate doorway content via AI, validate, render HTML.
@@ -160,6 +161,26 @@ async def generate_doorway(
         )
         if faq_qa:
             data["faq_qa"] = faq_qa
+
+    offer_theme = None
+    if generate_quiz and openai_service.is_available(user_openai_key):
+        off_r = await db.execute(
+            select(Offer.name).where(Offer.campaign_id == camp.id, Offer.name.isnot(None), Offer.name != "").limit(1)
+        )
+        row = off_r.first()
+        if row and row[0]:
+            offer_theme = (row[0] or "").strip()[:100]
+        if not offer_theme and getattr(camp, "name", None):
+            offer_theme = (camp.name or "").strip()[:100]
+        quiz_questions = await openai_service.generate_quiz(
+            keyword=keyword,
+            language=camp.language,
+            offer_theme=offer_theme,
+            max_questions=5,
+            api_key_override=user_openai_key,
+        )
+        if quiz_questions:
+            data["quiz_questions"] = quiz_questions
 
     canonical = f"https://{dom.domain.rstrip('/')}{path}" if path != "/" else f"https://{dom.domain}"
     html = render_doorway_page(

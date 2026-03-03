@@ -105,12 +105,21 @@ MIN_CONTENT_LENGTH = 400
 MIN_TITLE_LENGTH = 20
 MIN_DESCRIPTION_LENGTH = 80
 
+CODE_META_SHORT = "meta_short"
+CODE_KEYWORD_NOT_IN_TITLE = "keyword_not_in_title"
+CODE_KEYWORD_NOT_IN_CONTENT = "keyword_not_in_content"
+CODE_CONTENT_SHORT = "content_short"
+CODE_NO_URGENCY_SOCIAL_PROOF = "no_urgency_social_proof"
+CODE_NO_FAQ = "no_faq"
+
 
 @dataclass
 class ContentQualityResult:
     ok: bool
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    # Structured: (code, message) for auto-apply
+    warning_codes: List[Tuple[str, str]] = field(default_factory=list)
 
 
 def check_content_quality(
@@ -121,9 +130,11 @@ def check_content_quality(
 ) -> ContentQualityResult:
     """
     Pre-deploy quality checks. Returns ok=False if critical issues.
+    warning_codes: list of (code, message) for auto-apply.
     """
     errors: List[str] = []
     warnings: List[str] = []
+    warning_codes: List[Tuple[str, str]] = []
 
     title = (title or "").strip()
     meta = (meta_description or "").strip()
@@ -133,21 +144,29 @@ def check_content_quality(
     if len(content) < MIN_CONTENT_LENGTH:
         errors.append(f"Content too short: {len(content)} chars (min {MIN_CONTENT_LENGTH})")
     elif len(content) < 600:
-        warnings.append(f"Content may be too short for depth: {len(content)} chars")
+        w = f"Content may be too short for depth: {len(content)} chars"
+        warnings.append(w)
+        warning_codes.append((CODE_CONTENT_SHORT, w))
 
     if len(title) < MIN_TITLE_LENGTH:
         errors.append(f"Title too short: {len(title)} chars (min {MIN_TITLE_LENGTH})")
 
     if len(meta) < MIN_DESCRIPTION_LENGTH:
-        warnings.append(f"Meta description short: {len(meta)} chars (recommended {MIN_DESCRIPTION_LENGTH}+)")
+        w = f"Meta description short: {len(meta)} chars (recommended {MIN_DESCRIPTION_LENGTH}+)"
+        warnings.append(w)
+        warning_codes.append((CODE_META_SHORT, w))
 
     # Keyword alignment
     if keyword:
         kw_lower = keyword.lower()
         if kw_lower not in title.lower():
-            warnings.append(f"Keyword '{keyword}' not in title")
+            w = f"Keyword '{keyword}' not in title"
+            warnings.append(w)
+            warning_codes.append((CODE_KEYWORD_NOT_IN_TITLE, w))
         if kw_lower not in content.lower():
-            warnings.append(f"Keyword '{keyword}' not in content")
+            w = f"Keyword '{keyword}' not in content"
+            warnings.append(w)
+            warning_codes.append((CODE_KEYWORD_NOT_IN_CONTENT, w))
 
     # Template phrases
     text = f"{title} {meta} {content}"
@@ -159,4 +178,5 @@ def check_content_quality(
         ok=len(errors) == 0,
         errors=errors,
         warnings=warnings,
+        warning_codes=warning_codes,
     )

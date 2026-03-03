@@ -220,8 +220,10 @@ DOORWAY_UI_RU = {
     "email_done": "✓ Готово! Спасибо.",
     "email_error": "Ошибка",
     "email_required": "Введите email",
+    "quiz_title": "Подберите подходящий вариант",
+    "quiz_next": "Далее",
+    "quiz_submit": "Перейти к предложению",
 }
-DOORWAY_UI_EN = {
     "table_name": "Name",
     "table_rate": "Rate",
     "table_amount": "Amount",
@@ -250,6 +252,9 @@ DOORWAY_UI_EN = {
     "email_done": "✓ Done! Thank you.",
     "email_error": "Error",
     "email_required": "Enter your email",
+    "quiz_title": "Find the right option for you",
+    "quiz_next": "Next",
+    "quiz_submit": "Go to offer",
 }
 DOORWAY_UI_BY_LANG = {"ru": DOORWAY_UI_RU, "en": DOORWAY_UI_EN}
 for _k in ["de", "es", "pl", "fr", "pt"]:

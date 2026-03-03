@@ -131,6 +131,59 @@ class OpenAIService:
         except json.JSONDecodeError:
             return []
 
+    async def generate_quiz(
+        self,
+        *,
+        keyword: str,
+        language: str = "ru",
+        offer_theme: Optional[str] = None,
+        max_questions: int = 5,
+        api_key_override: Optional[str] = None,
+    ) -> list[dict]:
+        """Generate 3–5 quiz questions (question + options) for doorway. Topic from keyword + offer_theme.
+        Returns list of {question: str, options: [str]} (2–4 options per question). No 'correct' — flow leads to CTA."""
+        client = self.get_client_for_key(api_key_override)
+        theme = keyword
+        if offer_theme and str(offer_theme).strip():
+            theme = f"{keyword}. Тема оффера: {offer_theme.strip()}"
+        system_prompt = f"""Ты — копирайтер. Создаёшь короткий квиз для лендинга: несколько вопросов с вариантами ответа.
+Язык: {language}.
+
+Правила:
+- Вопросы по теме запроса, логично подводят к действию (оформить заявку / получить предложение).
+- 3–5 вопросов. У каждого вопроса 2–4 варианта ответа (короткие фразы).
+- Без правильных/неправильных ответов — любой выбор ведёт дальше.
+- Ответ — только валидный JSON массив: [{{"question": "...", "options": ["...", "..."]}}, ...]
+- question до 120 символов, каждый option до 60 символов."""
+
+        user_prompt = f'Тема квиза: "{theme}"'
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.5,
+        )
+        text = (response.choices[0].message.content or "[]").strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            text = parts[1][4:] if len(parts) > 1 and parts[1].strip().lower().startswith("json") else parts[1]
+        try:
+            arr = json.loads(text)
+            if not isinstance(arr, list):
+                return []
+            out = []
+            for item in arr[:max_questions]:
+                if isinstance(item, dict) and item.get("question") and isinstance(item.get("options"), list):
+                    opts = [str(o)[:60] for o in item["options"][:4] if o]
+                    if len(opts) >= 2:
+                        out.append({"question": str(item["question"])[:120], "options": opts})
+            return out
+        except json.JSONDecodeError:
+            return []
+
     async def generate_affiliate_recommendations(
         self,
         *,

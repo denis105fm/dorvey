@@ -677,6 +677,24 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
             "<tbody>" + "".join(rows) + "</tbody></table>"
         )
 
+    quiz_block = None
+    quiz_data = (dw.cloaking_rules or {}).get("quiz")
+    if not for_bot and isinstance(quiz_data, dict) and quiz_data.get("enabled") and quiz_data.get("questions"):
+        import json as _json
+        questions = quiz_data["questions"]
+        if isinstance(questions, list) and len(questions) >= 1:
+            q_title = html.escape(ui_table.get("quiz_title", "Подберите подходящий вариант"))
+            q_next = html.escape(ui_table.get("quiz_next", "Далее"))
+            q_submit = html.escape(ui_table.get("quiz_submit", "Перейти к предложению"))
+            cta_esc = html.escape(cta_href or "")
+            safe_questions = []
+            for q in questions[:8]:
+                if isinstance(q, dict) and q.get("question") and isinstance(q.get("options"), list):
+                    safe_questions.append({"question": str(q["question"])[:120], "options": [str(o)[:60] for o in q["options"][:4]]})
+            if safe_questions:
+                data_questions_esc = _json.dumps(safe_questions, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
+                quiz_block = f'''<div id="dv-quiz" class="dv-quiz" data-questions="{data_questions_esc}" data-cta-url="{cta_esc}" data-title="{q_title}" data-submit="{q_submit}"><h2>{q_title}</h2><div class="dv-quiz-question"><p id="dv-quiz-q"></p><div class="dv-quiz-options" id="dv-quiz-opts"></div><div class="dv-quiz-nav"><a id="dv-quiz-cta" href="{cta_esc}" class="cta" rel="nofollow" style="display:none">{q_submit}</a></div></div></div><script>(function(){{var el=document.getElementById("dv-quiz");if(!el)return;var q=JSON.parse(el.getAttribute("data-questions"));var idx=0;var qEl=document.getElementById("dv-quiz-q");var optsEl=document.getElementById("dv-quiz-opts");var ctaLink=document.getElementById("dv-quiz-cta");function show(){{if(idx>=q.length){{optsEl.innerHTML="";ctaLink.style.display="inline-block";return;}}var item=q[idx];qEl.textContent=item.question;optsEl.innerHTML="";item.options.forEach(function(opt){{var b=document.createElement("button");b.type="button";b.textContent=opt;b.onclick=function(){{idx++;show();}};optsEl.appendChild(b);}});}}show();}})();</script>'''
+
     if for_bot:
         hotjar_id = clarity_id = fb_pixel = ga_id = None
         exit_intent = False
@@ -709,6 +727,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         doorway_id=dw.id,
         faq_block=faq_block,
         internal_links_block=internal_links_block,
+        quiz_block=quiz_block,
         visitor_capture=False if for_bot else (visitor_capture and bool(click_base)),
         analytics_base=click_base or "",
         push_subscribe_enabled=False if for_bot else (visitor_capture and bool(click_base) and bool(vapid_public)),

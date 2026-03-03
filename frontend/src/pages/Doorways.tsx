@@ -13,7 +13,7 @@ import { FileText, MoreVertical, ExternalLink, ChevronRight, Search, Layers, Plu
 
 type Rec = { type: string; text: string };
 type ContentVariant = { title?: string; content?: string; meta_description?: string };
-type Doorway = { id: number; campaign_id: number; domain_id: number; path: string; title?: string; status: string; content_variants?: ContentVariant[]; pause_reason?: string | null };
+type Doorway = { id: number; campaign_id: number; domain_id: number; path: string; title?: string; status: string; content_variants?: ContentVariant[]; pause_reason?: string | null; cloaking_rules?: { quiz?: { enabled?: boolean; questions?: unknown[] } } };
 type DoorwayMetric = {
   doorway_id: number; clicks: number; revenue: number; conversions: number;
   profit_status: string; health_score: number; profit_probability?: string;
@@ -29,6 +29,14 @@ const STATUS_LABELS: Record<string, string> = {
   paused: "На паузе",
 };
 
+const FIX_CODE_LABELS: Record<string, string> = {
+  meta_short: "Meta 80+ символов",
+  keyword_not_in_title: "Ключ в заголовке",
+  keyword_not_in_content: "Ключ в контенте",
+  no_urgency_social_proof: "Urgency / Social proof",
+  no_faq: "Сгенерировать FAQ",
+};
+
 const PER_PAGE = 500;
 
 export default function Doorways() {
@@ -36,7 +44,7 @@ export default function Doorways() {
   const [wizardStep, setWizardStep] = useState(0);
   const [showGenerate, setShowGenerate] = useState(false);
   const [deployDoorwayId, setDeployDoorwayId] = useState<number | null>(null);
-  const [gen, setGen] = useState({ campaign_id: 1, domain_id: 1, keyword: "", path: "/", save: true, generate_faq: false });
+  const [gen, setGen] = useState({ campaign_id: 1, domain_id: 1, keyword: "", path: "/", save: true, generate_faq: false, generate_quiz: false });
   const [batchKeywords, setBatchKeywords] = useState("");
   const [result, setResult] = useState<{ html?: string; doorway_id?: number; validation_violations?: string[] } | null>(null);
   const [recsDoorwayId, setRecsDoorwayId] = useState<number | null>(null);
@@ -53,7 +61,9 @@ export default function Doorways() {
   const [cloneDomainId, setCloneDomainId] = useState<number>(0);
   const [clonePath, setClonePath] = useState("/");
   const [selectedDoorwayIds, setSelectedDoorwayIds] = useState<Set<number>>(new Set());
-  const [batchQualityResults, setBatchQualityResults] = useState<Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[] }> | null>(null);
+  const [batchQualityResults, setBatchQualityResults] = useState<Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[]; warning_codes?: { code: string; message: string }[] }> | null>(null);
+  const [qualityApplySelectedIds, setQualityApplySelectedIds] = useState<Set<number>>(new Set());
+  const [qualityApplyFixCodes, setQualityApplyFixCodes] = useState<Set<string>>(new Set());
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -85,6 +95,12 @@ export default function Doorways() {
     (doorwaysMetrics?.doorways ?? []).forEach((m: DoorwayMetric) => map.set(m.doorway_id, m));
     return map;
   }, [doorwaysMetrics]);
+  const qualityUniqueFixCodes = useMemo(() => {
+    if (!batchQualityResults?.length) return [];
+    const set = new Set<string>();
+    batchQualityResults.forEach((r) => (r.warning_codes || []).forEach((w: { code: string }) => set.add(w.code)));
+    return Array.from(set).filter((code) => code in FIX_CODE_LABELS);
+  }, [batchQualityResults]);
 
   const filtered = useMemo(() => {
     if (!doorways) return [];
@@ -146,13 +162,26 @@ export default function Doorways() {
   });
   const batchQualityMut = useMutation({
     mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-quality-check", { doorway_ids }).then((r) => r.data),
-    onSuccess: (data: { results?: Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[] }> }) => {
+    onSuccess: (data: { results?: Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[]; warning_codes?: { code: string; message: string }[] }> }) => {
       setBatchQualityResults(data.results ?? []);
+      setQualityApplySelectedIds(new Set());
+      setQualityApplyFixCodes(new Set());
     },
     onError: () => toast.error("Ошибка проверки"),
   });
+  const batchApplyWarningsMut = useMutation({
+    mutationFn: (payload: { doorway_ids: number[]; fix_codes: string[] }) =>
+      api.post("/doorways/batch-apply-warnings", payload, { timeout: 120000 }).then((r) => r.data),
+    onSuccess: (data: { applied?: Record<string, number>; errors?: string[] }) => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      const n = Object.values(data.applied || {}).reduce((a, b) => a + b, 0);
+      if (n > 0) toast.success(`Применено исправлений: ${n}`);
+      if (data.errors?.length) toast.warning(data.errors.slice(0, 2).join("; "));
+    },
+    onError: () => toast.error("Ошибка применения"),
+  });
   const batchMut = useMutation({
-    mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean }) =>
+    mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean; generate_quiz?: boolean }) =>
       api.post("/doorways/generate-batch", payload, { timeout: 600000 }).then((r) => r.data),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["doorways"] });
@@ -266,6 +295,14 @@ export default function Doorways() {
     },
     onError: () => toast.error("Ошибка"),
   });
+  const quizToggleMut = useMutation({
+    mutationFn: ({ id, quiz_enabled }: { id: number; quiz_enabled: boolean }) => api.patch(`/doorways/${id}`, { quiz_enabled }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      toast.success("Квиз обновлён");
+    },
+    onError: () => toast.error("Ошибка"),
+  });
   const cloneToDomainMut = useMutation({
     mutationFn: ({ id, domain_id, path }: { id: number; domain_id: number; path: string }) =>
       api.post(`/optimizer/doorway/${id}/clone-to-domain`, { domain_id, path }).then((r) => r.data),
@@ -303,7 +340,7 @@ export default function Doorways() {
       keyword,
       path: gen.path === "/" ? `/${slug(keyword)}` : gen.path,
     }));
-    batchMut.mutate({ items, generate_faq: gen.generate_faq });
+    batchMut.mutate({ items, generate_faq: gen.generate_faq, generate_quiz: gen.generate_quiz });
   };
 
   return (
@@ -451,7 +488,7 @@ export default function Doorways() {
                   <p className="mt-1 text-amber-400 text-sm">Первая ошибка: {(batchMut.data.results as Array<{ status?: string; error?: string }>).find((r) => r.status === "error")?.error}</p>
                 )}
               </div>
-              <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки). Галочка «Сгенерировать FAQ» действует и для одиночной, и для пакетной генерации.</p>
+              <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки). Галочки FAQ и Квиз действуют для одиночной и пакетной генерации.</p>
               <div className="flex items-center gap-4 flex-wrap">
                 <label className="flex items-center gap-2 text-slate-300">
                   <input type="checkbox" checked={gen.save} onChange={(e) => setGen((g) => ({ ...g, save: e.target.checked }))} className="rounded" />
@@ -460,6 +497,10 @@ export default function Doorways() {
                 <label className="flex items-center gap-2 text-slate-300">
                   <input type="checkbox" checked={gen.generate_faq} onChange={(e) => setGen((g) => ({ ...g, generate_faq: e.target.checked }))} className="rounded" />
                   Сгенерировать FAQ (3–5 вопросов)
+                </label>
+                <label className="flex items-center gap-2 text-slate-300">
+                  <input type="checkbox" checked={gen.generate_quiz} onChange={(e) => setGen((g) => ({ ...g, generate_quiz: e.target.checked }))} className="rounded" />
+                  Сгенерировать квиз (по теме оффера)
                 </label>
                 <Button onClick={() => generateMut.mutate(gen)} disabled={!gen.keyword.trim() || generateMut.isPending}>
                   {generateMut.isPending ? "Генерация..." : "Сгенерировать"}
@@ -747,6 +788,14 @@ export default function Doorways() {
                             <DropdownMenuItem onClick={() => setVariantsDoorwayId(variantsDoorwayId === d.id ? null : d.id)}>
                               <Layers size={14} className="mr-2" /> Варианты A/B
                             </DropdownMenuItem>
+                            {((d.cloaking_rules as { quiz?: { questions?: unknown[] } })?.quiz?.questions?.length ?? 0) > 0 && (
+                              <DropdownMenuItem
+                                onClick={() => quizToggleMut.mutate({ id: d.id, quiz_enabled: !(d.cloaking_rules as { quiz?: { enabled?: boolean } })?.quiz?.enabled })}
+                                disabled={quizToggleMut.isPending}
+                              >
+                                Квиз: {(d.cloaking_rules as { quiz?: { enabled?: boolean } })?.quiz?.enabled ? "выкл" : "вкл"}
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => openPanel(d.id, "quality")}>Quality</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openPanel(d.id, "predict")}>Predict CR</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openPanel(d.id, "forecast")}>Прогноз прибыли</DropdownMenuItem>
@@ -981,10 +1030,59 @@ export default function Doorways() {
               <span>Quality — результаты проверки ({batchQualityResults.length})</span>
               <button onClick={() => setBatchQualityResults(null)} className="text-slate-400 hover:text-white">✕</button>
             </h2>
+            {qualityUniqueFixCodes.length > 0 && (
+              <div className="mb-3 p-3 bg-slate-700/50 rounded-lg border border-slate-600">
+                <p className="text-slate-400 text-xs font-medium mb-2">Применить исправления</p>
+                <div className="flex flex-wrap gap-3 items-center">
+                  {qualityUniqueFixCodes.map((code) => (
+                    <label key={code} className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={qualityApplyFixCodes.has(code)}
+                        onChange={(e) => {
+                          if (e.target.checked) setQualityApplyFixCodes((s) => new Set([...s, code]));
+                          else setQualityApplyFixCodes((s) => { const n = new Set(s); n.delete(code); return n; });
+                        }}
+                        className="rounded border-slate-600 text-emerald-600"
+                      />
+                      {FIX_CODE_LABELS[code] ?? code}
+                    </label>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Button
+                    size="sm"
+                    disabled={qualityApplyFixCodes.size === 0 || qualityApplySelectedIds.size === 0 || batchApplyWarningsMut.isPending}
+                    onClick={() => batchApplyWarningsMut.mutate({ doorway_ids: Array.from(qualityApplySelectedIds), fix_codes: Array.from(qualityApplyFixCodes) })}
+                  >
+                    {batchApplyWarningsMut.isPending ? "Применяю…" : `Применить к выбранным (${qualityApplySelectedIds.size})`}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={qualityApplyFixCodes.size === 0 || batchApplyWarningsMut.isPending}
+                    onClick={() => batchApplyWarningsMut.mutate({ doorway_ids: batchQualityResults.map((r) => r.doorway_id), fix_codes: Array.from(qualityApplyFixCodes) })}
+                  >
+                    {batchApplyWarningsMut.isPending ? "Применяю…" : `Применить ко всем (${batchQualityResults.length})`}
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="overflow-y-auto flex-1 min-h-0">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-600 text-slate-400">
+                    <th className="w-10 py-2 pr-1 text-left font-medium">
+                      <input
+                        type="checkbox"
+                        checked={batchQualityResults.length > 0 && qualityApplySelectedIds.size === batchQualityResults.length}
+                        onChange={(e) => {
+                          if (e.target.checked) setQualityApplySelectedIds(new Set(batchQualityResults.map((r) => r.doorway_id)));
+                          else setQualityApplySelectedIds(new Set());
+                        }}
+                        className="rounded border-slate-600 text-emerald-600"
+                      />
+                    </th>
                     <th className="text-left py-2 font-medium">ID</th>
                     <th className="text-left py-2 font-medium">Путь</th>
                     <th className="text-left py-2 font-medium">Заголовок</th>
@@ -995,6 +1093,17 @@ export default function Doorways() {
                 <tbody>
                   {batchQualityResults.map((row) => (
                     <tr key={row.doorway_id} className="border-b border-slate-700/50">
+                      <td className="py-2 pr-1">
+                        <input
+                          type="checkbox"
+                          checked={qualityApplySelectedIds.has(row.doorway_id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setQualityApplySelectedIds((s) => new Set([...s, row.doorway_id]));
+                            else setQualityApplySelectedIds((s) => { const n = new Set(s); n.delete(row.doorway_id); return n; });
+                          }}
+                          className="rounded border-slate-600 text-emerald-600"
+                        />
+                      </td>
                       <td className="py-2 font-mono text-white">{row.doorway_id}</td>
                       <td className="py-2 text-slate-300">{row.path || "—"}</td>
                       <td className="py-2 text-slate-400 truncate max-w-[180px]" title={row.title}>{row.title || "—"}</td>
@@ -1009,7 +1118,8 @@ export default function Doorways() {
                 </tbody>
               </table>
             </div>
-            <div className="pt-3 border-t border-slate-700">
+            <div className="pt-3 border-t border-slate-700 flex justify-between items-center">
+              <span className="text-slate-500 text-sm">Выбрано: {qualityApplySelectedIds.size} из {batchQualityResults.length}</span>
               <Button variant="secondary" onClick={() => setBatchQualityResults(null)}>Закрыть</Button>
             </div>
           </div>

@@ -68,6 +68,7 @@ async def generate_doorway_content(
             keyword=data.keyword,
             path=data.path,
             generate_faq=data.generate_faq,
+            generate_quiz=data.generate_quiz,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -76,6 +77,8 @@ async def generate_doorway_content(
         cloaking = {}
         if result.get("faq_qa"):
             cloaking["faq_qa"] = result["faq_qa"]
+        if result.get("quiz_questions"):
+            cloaking["quiz"] = {"enabled": True, "questions": result["quiz_questions"]}
         camp = (await db.execute(select(Campaign).where(Campaign.id == data.campaign_id))).scalar_one_or_none()
         preferred_layout = None
         if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
@@ -143,6 +146,7 @@ async def generate_batch(
                 keyword=item.keyword,
                 path=item.path,
                 generate_faq=data.generate_faq,
+                generate_quiz=data.generate_quiz,
             )
         except (ValueError, Exception) as e:
             results.append({"keyword": item.keyword, "status": "error", "error": str(e)[:200]})
@@ -152,6 +156,8 @@ async def generate_batch(
             cloaking = {}
             if gen_result.get("faq_qa"):
                 cloaking["faq_qa"] = gen_result["faq_qa"]
+            if gen_result.get("quiz_questions"):
+                cloaking["quiz"] = {"enabled": True, "questions": gen_result["quiz_questions"]}
             camp = (await db.execute(select(Campaign).where(Campaign.id == item.campaign_id))).scalar_one_or_none()
             preferred_layout = None
             if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
@@ -223,7 +229,7 @@ async def doorway_quality_check(
     db: AsyncSession = Depends(get_db),
 ):
     """Pre-deploy content quality check (anti-detection) + campaign readiness."""
-    from app.services.anti_detection import check_content_quality
+    from app.services.anti_detection import check_content_quality, CODE_NO_URGENCY_SOCIAL_PROOF, CODE_NO_FAQ
 
     result = await db.execute(
         select(Doorway, Campaign)
@@ -250,15 +256,18 @@ async def doorway_quality_check(
     )
     errors = list(r.errors)
     warnings = list(r.warnings)
+    warning_codes = list(r.warning_codes)
     if not (campaign.affiliate_url or "").strip():
         errors.append("Кампания без affiliate URL — CTA не будет работать")
     cr = doorway.cloaking_rules or {}
     camp_settings = (campaign.affiliate_rules or {}).get("settings") or {}
     if not (cr.get("urgency_block") or camp_settings.get("urgency_block")) and not cr.get("social_proof"):
         warnings.append("Нет urgency или social proof — можно добавить в Конверсию")
+        warning_codes.append((CODE_NO_URGENCY_SOCIAL_PROOF, "Нет urgency или social proof — можно добавить в Конверсию"))
     if not cr.get("faq_qa"):
         warnings.append("Нет FAQ — можно сгенерировать при создании дорвея")
-    return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings}
+        warning_codes.append((CODE_NO_FAQ, "Нет FAQ — можно сгенерировать при создании дорвея"))
+    return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings, "warning_codes": [{"code": c, "message": m} for c, m in warning_codes]}
 
 
 @router.get("/{doorway_id}", response_model=DoorwayResponse)
@@ -293,7 +302,15 @@ async def update_doorway(
     doorway = result.scalar_one_or_none()
     if not doorway:
         raise HTTPException(status_code=404, detail="Doorway not found")
-    for k, v in data.model_dump(exclude_unset=True).items():
+    payload = data.model_dump(exclude_unset=True)
+    quiz_enabled = payload.pop("quiz_enabled", None)
+    if quiz_enabled is not None:
+        cr = dict(doorway.cloaking_rules or {})
+        quiz = dict(cr.get("quiz") or {})
+        quiz["enabled"] = quiz_enabled
+        cr["quiz"] = quiz
+        doorway.cloaking_rules = cr
+    for k, v in payload.items():
         setattr(doorway, k, v)
     await db.commit()
     await db.refresh(doorway)
@@ -453,7 +470,7 @@ async def batch_quality_check(
     if not data.doorway_ids:
         return {"results": []}
     from app.models.keyword import Keyword
-    from app.services.anti_detection import check_content_quality
+    from app.services.anti_detection import check_content_quality, CODE_NO_URGENCY_SOCIAL_PROOF, CODE_NO_FAQ
 
     result = await db.execute(
         select(Doorway, Campaign)
@@ -481,14 +498,17 @@ async def batch_quality_check(
         )
         errors = list(r.errors)
         warnings = list(r.warnings)
+        warning_codes = list(r.warning_codes)
         if not (campaign.affiliate_url or "").strip():
             errors.append("Кампания без affiliate URL — CTA не будет работать")
         cr = doorway.cloaking_rules or {}
         camp_settings = (campaign.affiliate_rules or {}).get("settings") or {}
         if not (cr.get("urgency_block") or camp_settings.get("urgency_block")) and not cr.get("social_proof"):
             warnings.append("Нет urgency или social proof — можно добавить в Конверсию")
+            warning_codes.append((CODE_NO_URGENCY_SOCIAL_PROOF, "Нет urgency или social proof — можно добавить в Конверсию"))
         if not cr.get("faq_qa"):
             warnings.append("Нет FAQ — можно сгенерировать при создании дорвея")
+            warning_codes.append((CODE_NO_FAQ, "Нет FAQ — можно сгенерировать при создании дорвея"))
         out.append({
             "doorway_id": doorway.id,
             "path": doorway.path,
@@ -496,5 +516,25 @@ async def batch_quality_check(
             "ok": len(errors) == 0,
             "errors": errors,
             "warnings": warnings,
+            "warning_codes": [{"code": c, "message": m} for c, m in warning_codes],
         })
     return {"results": out}
+
+
+class BatchApplyWarningsRequest(BaseModel):
+    doorway_ids: List[int]
+    fix_codes: List[str]  # e.g. ["meta_short", "keyword_not_in_title", "no_urgency_social_proof", "no_faq"]
+
+
+@router.post("/batch-apply-warnings")
+async def batch_apply_warnings(
+    data: BatchApplyWarningsRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Применить исправления по предупреждениям к выбранным дорвеям (один, несколько или все из отчёта)."""
+    if not data.doorway_ids or not data.fix_codes:
+        return {"applied": {}, "per_doorway": [], "errors": [], "message": "Нет дорвеев или типов исправлений"}
+    from app.services.quality_fixes import batch_apply_warnings as do_batch_apply
+    result = await do_batch_apply(db, data.doorway_ids, data.fix_codes, current_user.id)
+    return result

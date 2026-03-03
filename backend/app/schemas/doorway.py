@@ -31,6 +31,7 @@ class DoorwayUpdate(BaseModel):
     cloaking_rules: Optional[dict[str, Any]] = None
     status: Optional[str] = None
     layout_index: Optional[int] = None
+    quiz_enabled: Optional[bool] = None  # Toggle quiz block visibility (merged into cloaking_rules.quiz.enabled)
 
 
 class DoorwayBatchItem(BaseModel):
@@ -43,6 +44,7 @@ class DoorwayBatchItem(BaseModel):
 class DoorwayBatchGenerateRequest(BaseModel):
     items: list[DoorwayBatchItem]
     generate_faq: bool = False  # Generate 3-5 Q&A for FAQ block (same as single generation)
+    generate_quiz: bool = False  # Generate quiz block for each doorway
 
 
 class DoorwayBatchGenerateResponse(BaseModel):
@@ -57,6 +59,7 @@ class DoorwayGenerateRequest(BaseModel):
     path: str = "/"
     save: bool = True  # Create doorway in DB after generation
     generate_faq: bool = False  # Generate 3-5 Q&A for FAQ/PAA schema
+    generate_quiz: bool = False  # Generate quiz block (topic from keyword + offer theme)
 
 
 class DoorwayGenerateResponse(BaseModel):
@@ -67,6 +70,7 @@ class DoorwayGenerateResponse(BaseModel):
     doorway_id: Optional[int] = None  # If save=True
     validation_violations: Optional[list[str]] = None
     faq_qa: Optional[list[dict[str, str]]] = None  # [{question, answer}, ...]
+    quiz_questions: Optional[list[dict]] = None  # [{question, options}, ...]
 
 
 class DoorwayResponse(DoorwayBase):

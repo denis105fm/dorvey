@@ -7,7 +7,7 @@ from app.services.anti_detection import shuffle_block_order
 
 
 # Block names for structural variation (order randomized per page)
-DEFAULT_BLOCKS = ["content", "trust", "urgency", "comparison", "social_proof", "faq", "internal_links", "cta", "cta_footer"]
+DEFAULT_BLOCKS = ["content", "trust", "urgency", "comparison", "quiz", "social_proof", "faq", "internal_links", "cta", "cta_footer"]
 
 
 # Layout variants: different class prefixes / structure (anti-fingerprint)
@@ -66,6 +66,13 @@ DEFAULT_PAGE_TEMPLATE = """<!DOCTYPE html>
         .internal-links-list li { margin: 0.5rem 0; }
         .internal-links-list a { color: #16a34a; text-decoration: none; }
         .internal-links-list a:hover { text-decoration: underline; }
+        .dv-quiz { margin: 1.5rem 0; padding: 1.25rem; background: #f0fdf4; border-radius: 0.5rem; border: 1px solid #bbf7d0; }
+        .dv-quiz h2 { font-size: 1.2rem; margin-bottom: 1rem; color: #166534; }
+        .dv-quiz-question { margin-bottom: 1rem; }
+        .dv-quiz-options { display: flex; flex-direction: column; gap: 0.5rem; }
+        .dv-quiz-options button { padding: 0.65rem 1rem; text-align: left; background: #fff; border: 1px solid #86efac; border-radius: 0.375rem; cursor: pointer; font-size: 0.95rem; }
+        .dv-quiz-options button:hover { background: #dcfce7; }
+        .dv-quiz-nav { margin-top: 1rem; }
     </style>
 </head>
 <body class="{{ body_class }}"{% if data_offers %} data-offers="{{ data_offers | e }}" data-doorway-id="{{ doorway_id | default('') }}"{% endif %}>
@@ -95,6 +102,7 @@ def _build_main_content(
     cta_footer: bool = True,
     faq_block: Optional[str] = None,
     internal_links_block: Optional[str] = None,
+    quiz_block: Optional[str] = None,
     default_cta: str = "Learn more",
 ) -> str:
     """Assemble body blocks in given order (structural randomization)."""
@@ -127,6 +135,7 @@ def _build_main_content(
         "social_proof": f'<div class="social-proof">{social_proof_block}</div>' if social_proof_block else "",
         "faq": f'<div class="faq-block">{faq_block}</div>' if faq_block else "",
         "internal_links": f'<div class="internal-links-wrap">{internal_links_block}</div>' if internal_links_block else "",
+        "quiz": quiz_block or "",
         "cta": cta_html,
         "cta_footer": cta_footer_html,
     }
@@ -166,6 +175,7 @@ def render_doorway_page(
     cta_footer: bool = True,
     faq_block: Optional[str] = None,
     internal_links_block: Optional[str] = None,
+    quiz_block: Optional[str] = None,
     visitor_capture: bool = False,
     analytics_base: Optional[str] = None,
     push_subscribe_enabled: bool = False,
@@ -216,6 +226,7 @@ def render_doorway_page(
         cta_footer=cta_footer,
         faq_block=faq_block,
         internal_links_block=internal_links_block,
+        quiz_block=quiz_block,
         default_cta=ui.get("default_cta", "Learn more"),
     )
     body_class = css_variant["main"]
