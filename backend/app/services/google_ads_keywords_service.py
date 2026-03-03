@@ -409,6 +409,22 @@ async def fetch_keywords_for_keywords(
                     "message": "Рекламный аккаунт недоступен: ещё не активирован или деактивирован. Проверьте Customer ID в настройках (должен быть активный тестовый клиентский аккаунт под вашим MCC).",
                     "api_error": err_msg[:500],
                 }
+            is_perm_denied = (
+                "permission_denied" in err_lower
+                or "test accounts" in err_lower
+                or "basic or standard access" in err_lower
+                or ("developer token" in err_lower and "only approved" in err_lower)
+                or "statuscode.permission_denied" in err_lower
+                or "permission_denied" in details_str
+                or "test accounts" in details_str
+                or "only approved for use with test accounts" in err_lower
+                or "only approved for use with test accounts" in details_str
+            )
+            if is_perm_denied:
+                return [], {
+                    "message": "Developer Token в режиме Test работает только с дочерними аккаунтами вашего MCC. Убедитесь: 1) В поле Manager account ID (MCC) указан ваш тестовый MCC (например 185-780-6498). 2) В поле Customer ID указан дочерний аккаунт из «Настройки дочерних аккаунтов» этого MCC (например 403-443-4560). Сохраните настройки и попробуйте снова.",
+                    "api_error": err_msg[:500],
+                }
             msg = err_msg[:300]
             if details:
                 msg += "\n" + "\n".join(details[:15])
@@ -431,6 +447,7 @@ async def fetch_keywords_for_keywords(
             or "basic or standard access" in err_lower
             or ("developer token" in err_lower and "only approved" in err_lower)
             or "statuscode.permission_denied" in err_lower
+            or "only approved for use with test accounts" in err_lower
         )
         if is_permission_denied:
             return [], {
