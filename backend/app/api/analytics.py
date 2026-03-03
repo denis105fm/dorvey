@@ -333,7 +333,7 @@ async def click_redirect(
     aff_url = camp.affiliate_url
     if not aff_url:
         raise HTTPException(status_code=400, detail="No affiliate URL")
-    from app.services.deploy import _append_sub_id, get_best_offer_url_by_roi
+    from app.services.deploy import _append_sub_id, get_best_offer_url_by_roi, _get_best_offer_url
     off_r = await db.execute(
         select(Offer)
         .where(Offer.campaign_id == camp.id, Offer.is_active == True)
@@ -342,12 +342,34 @@ async def click_redirect(
     offers_list = [{"id": o.id, "url": o.url, "geo": o.geo, "device": o.device, "priority": o.priority, "is_active": o.is_active, "rate": o.rate} for o in off_r.scalars().all()]
     chosen_offer_id = oid
     if offers_list:
-        best_url, best_oid = await get_best_offer_url_by_roi(db, offers_list, geo=geo, device=device)
-        if best_url:
-            aff_url = best_url
-            if chosen_offer_id is None:
-                chosen_offer_id = best_oid
+        # Если в ссылке передан oid — берём URL именно этого оффера
+        if chosen_offer_id:
+            for o in offers_list:
+                if o.get("id") == chosen_offer_id and o.get("url"):
+                    aff_url = o["url"]
+                    break
+        if not aff_url or aff_url == camp.affiliate_url:
+            best_url, best_oid = await get_best_offer_url_by_roi(db, offers_list, geo=geo, device=device)
+            if best_url:
+                aff_url = best_url
+                if chosen_offer_id is None:
+                    chosen_offer_id = best_oid
+            else:
+                # Нет ROI — выбираем по приоритету/geo/device, ссылка всегда из оффера
+                fallback_url = _get_best_offer_url(offers_list, geo=geo, device=device)
+                if fallback_url:
+                    aff_url = fallback_url
+                    if chosen_offer_id is None:
+                        chosen_offer_id = next((o["id"] for o in offers_list if o.get("url") == fallback_url), None)
     target = _append_sub_id(aff_url, doorway_id, chosen_offer_id, traffic_source)
+    # Плейсхолдеры для партнёрских сетей (Zeydoo и др.): {SOURCE_ID} = sub_id, {CLICK_ID} = vid
+    sid = f"{doorway_id}_{chosen_offer_id}" if (chosen_offer_id and chosen_offer_id > 0) else str(doorway_id)
+    if traffic_source:
+        sid = f"{sid}_{traffic_source}"
+    if "{SOURCE_ID}" in target:
+        target = target.replace("{SOURCE_ID}", sid)
+    if "{CLICK_ID}" in target:
+        target = target.replace("{CLICK_ID}", (vid or ""))
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     r2 = await db.execute(
         select(DoorwayMetrics).where(
