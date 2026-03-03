@@ -147,9 +147,22 @@ def _create_test_client_sync(
             for err in ex.failure.errors:
                 parts.append(getattr(err, "message", str(err)) or "")
             err_msg = " ".join(parts)[:400]
+        if "PERMISSION_DENIED" in err_msg.upper() or "does not have permission" in err_msg:
+            return None, (
+                "Нет прав на создание аккаунта. Убедитесь, что в поле Customer ID указан именно "
+                "тестовый менеджер (MCC), созданный по ссылке «Создать тестовый MCC», и что OAuth выполнен "
+                "тем же Google-аккаунтом, который владеет этим тестовым MCC. Developer Token должен быть в режиме Test."
+            )
         return None, err_msg or "Ошибка Google Ads API"
     except Exception as e:
-        return None, str(e)[:300]
+        err_str = str(e)[:300]
+        if "PERMISSION_DENIED" in err_str.upper() or "does not have permission" in err_str.lower():
+            return None, (
+                "Нет прав на создание аккаунта. Убедитесь, что в поле Customer ID указан именно "
+                "тестовый менеджер (MCC), созданный по ссылке «Создать тестовый MCC», и что OAuth выполнен "
+                "тем же Google-аккаунтом, который владеет этим тестовым MCC. Developer Token должен быть в режиме Test."
+            )
+        return None, err_str
 
     resource_name = getattr(response, "resource_name", None) or ""
     if resource_name.startswith("customers/"):
