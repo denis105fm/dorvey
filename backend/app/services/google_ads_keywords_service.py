@@ -390,6 +390,14 @@ async def fetch_keywords_for_keywords(
                         path_elts = getattr(loc, "field_path_elements", None) or []
                         for fp in (path_elts or []):
                             details.append("  поле: " + str(getattr(fp, "field_name", fp)))
+            # Короткая подсказка для типичных ошибок
+            err_lower = err_msg.lower()
+            details_str = " ".join(details).lower() if details else ""
+            if "not yet enabled" in err_lower or "deactivated" in err_lower or "can't be accessed" in err_lower or "not yet enabled" in details_str or "deactivated" in details_str:
+                return [], {
+                    "message": "Рекламный аккаунт недоступен: ещё не активирован или деактивирован. Проверьте Customer ID в настройках (должен быть активный тестовый клиентский аккаунт под вашим MCC).",
+                    "api_error": err_msg[:500],
+                }
             msg = err_msg[:300]
             if details:
                 msg += "\n" + "\n".join(details[:15])
@@ -401,6 +409,11 @@ async def fetch_keywords_for_keywords(
         # Любая другая ошибка официального клиента — возвращаем как есть, REST не вызываем
         err_str = str(e)
         err_lower = err_str.lower()
+        if "not yet enabled" in err_lower or "deactivated" in err_lower or "can't be accessed" in err_lower:
+            return [], {
+                "message": "Рекламный аккаунт недоступен: ещё не активирован или деактивирован. Проверьте Customer ID в настройках (должен быть активный тестовый клиентский аккаунт под вашим MCC).",
+                "api_error": err_str[:500],
+            }
         is_permission_denied = (
             "permission_denied" in err_lower
             or "test accounts" in err_lower
