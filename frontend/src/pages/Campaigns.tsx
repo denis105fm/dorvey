@@ -44,6 +44,7 @@ export default function Campaigns() {
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [edit, setEdit] = useState<Campaign | null>(null);
   const [showActionsHelp, setShowActionsHelp] = useState(false);
+  const [rulesForm, setRulesForm] = useState<Record<string, unknown> | null>(null);
   const [form, setForm] = useState({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" });
   const [convForm, setConvForm] = useState({
     urgency_text: "",
@@ -183,6 +184,18 @@ export default function Campaigns() {
       show_offers_table: conversion.show_offers_table === true,
     });
   }, [conversion]);
+
+  useEffect(() => {
+    if (!rulesCampaignId || !rules) return;
+    setRulesForm({
+      ...rules,
+      require_disclaimer: rules.require_disclaimer ?? false,
+      auto_switch_on_cr_drop: rules.auto_switch_on_cr_drop ?? false,
+      auto_rollback_on_cr_drop: rules.auto_rollback_on_cr_drop ?? false,
+      cloaking_enabled: rules.cloaking_enabled ?? false,
+      auto_apply_recommendations: rules.auto_apply_recommendations ?? false,
+    });
+  }, [rulesCampaignId, rules]);
 
   const openEdit = (c: Campaign) => {
     setEdit(c);
@@ -452,42 +465,48 @@ export default function Campaigns() {
               <h2 className="text-lg font-medium text-white mb-3">Правила кампании #{rulesCampaignId}
                 <button onClick={() => setRulesCampaignId(null)} className="ml-2 text-slate-400 hover:text-white text-sm">✕</button>
               </h2>
-              {rulesLoading ? <p className="text-slate-400">Загрузка...</p> : rules && (
+              {rulesLoading ? <p className="text-slate-400">Загрузка...</p> : rules && (() => {
+                const r = (rulesForm ?? rules) as Record<string, unknown>;
+                const setR = (patch: Record<string, unknown>) => {
+                  setRulesForm(prev => ({ ...(prev ?? rules), ...patch }));
+                  updateRulesMut.mutate(patch);
+                };
+                return (
                 <div className="space-y-3">
                   <div>
                     <label className="block text-slate-400 text-sm mb-1">Запрещённые слова (через запятую)</label>
-                    <input value={(rules.forbidden_words || []).join(", ")} onChange={(e) => updateRulesMut.mutate({ forbidden_words: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                    <input value={(r.forbidden_words as string[] || []).join(", ")} onChange={(e) => setR({ forbidden_words: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
                       className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                   </div>
                   <div>
                     <label className="block text-slate-400 text-sm mb-1">Разрешённые GEO (через запятую)</label>
-                    <input value={(rules.allowed_geo || []).join(", ")} onChange={(e) => updateRulesMut.mutate({ allowed_geo: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                    <input value={(r.allowed_geo as string[] || []).join(", ")} onChange={(e) => setR({ allowed_geo: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
                       className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                   </div>
                   <div className="flex gap-4">
-                    <label className="flex items-center gap-2 text-slate-300">
-                      <input type="checkbox" checked={rules.require_disclaimer ?? false} onChange={(e) => updateRulesMut.mutate({ require_disclaimer: e.target.checked })} />
+                    <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                      <input type="checkbox" checked={!!(r.require_disclaimer ?? false)} onChange={(e) => setR({ require_disclaimer: e.target.checked })} className="cursor-pointer" />
                       Disclaimer обязателен
                     </label>
-                    <label className="flex items-center gap-2 text-slate-300">
-                      <input type="checkbox" checked={rules.auto_switch_on_cr_drop ?? false} onChange={(e) => updateRulesMut.mutate({ auto_switch_on_cr_drop: e.target.checked })} />
+                    <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                      <input type="checkbox" checked={!!(r.auto_switch_on_cr_drop ?? false)} onChange={(e) => setR({ auto_switch_on_cr_drop: e.target.checked })} className="cursor-pointer" />
                       Автосмена оффера при падении CR
                     </label>
-                    <label className="flex items-center gap-2 text-slate-300">
-                      <input type="checkbox" checked={rules.auto_rollback_on_cr_drop ?? false} onChange={(e) => updateRulesMut.mutate({ auto_rollback_on_cr_drop: e.target.checked })} />
+                    <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                      <input type="checkbox" checked={!!(r.auto_rollback_on_cr_drop ?? false)} onChange={(e) => setR({ auto_rollback_on_cr_drop: e.target.checked })} className="cursor-pointer" />
                       Автооткат при падении CR
                     </label>
-                    <label className="flex items-center gap-2 text-slate-300" title="Бот видит SEO-версию, человек — конверсионную. Нужен Nginx map по User-Agent.">
-                      <input type="checkbox" checked={rules.cloaking_enabled ?? false} onChange={(e) => updateRulesMut.mutate({ cloaking_enabled: e.target.checked })} />
+                    <label className="flex items-center gap-2 text-slate-300 cursor-pointer" title="Бот видит SEO-версию, человек — конверсионную. Нужен Nginx map по User-Agent.">
+                      <input type="checkbox" checked={!!(r.cloaking_enabled ?? false)} onChange={(e) => setR({ cloaking_enabled: e.target.checked })} className="cursor-pointer" />
                       Cloaking (бот / человек)
                     </label>
                   </div>
-                  {rules.cloaking_enabled && (
+                  {r.cloaking_enabled && (
                     <div>
                       <label className="block text-slate-400 text-sm mb-1">User-Agent для ботов (через запятую, для Nginx)</label>
                       <input
-                        value={Array.isArray(rules.cloaking_bot_patterns) ? rules.cloaking_bot_patterns.join(", ") : (rules.cloaking_bot_patterns ?? "Googlebot, YandexBot, bingbot").toString()}
-                        onChange={(e) => updateRulesMut.mutate({ cloaking_bot_patterns: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                        value={Array.isArray(r.cloaking_bot_patterns) ? (r.cloaking_bot_patterns as string[]).join(", ") : (r.cloaking_bot_patterns ?? "Googlebot, YandexBot, bingbot").toString()}
+                        onChange={(e) => setR({ cloaking_bot_patterns: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
                         placeholder="Googlebot, YandexBot, bingbot"
                         className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
                       />
@@ -495,39 +514,39 @@ export default function Campaigns() {
                   )}
                   <div>
                     <label className="block text-slate-400 text-sm mb-1">Порог отката (% падения CR)</label>
-                    <input type="number" value={rules.rollback_threshold_percent ?? 15} onChange={(e) => updateRulesMut.mutate({ rollback_threshold_percent: parseFloat(e.target.value) || 15 })}
+                    <input type="number" value={r.rollback_threshold_percent ?? 15} onChange={(e) => setR({ rollback_threshold_percent: parseFloat(e.target.value) || 15 })}
                       className="w-32 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                   </div>
-                  {(rules.preferred_layout_index !== undefined && rules.preferred_layout_index !== null) && (
+                  {(r.preferred_layout_index !== undefined && r.preferred_layout_index !== null) && (
                     <p className="text-slate-400 text-sm">
-                      Layout для новых дорвеев: <span className="text-amber-400">{rules.preferred_layout_index}</span>
-                      <button type="button" onClick={() => updateRulesMut.mutate({ preferred_layout_index: null })} className="ml-2 text-slate-500 hover:text-white text-xs">Сбросить</button>
+                      Layout для новых дорвеев: <span className="text-amber-400">{String(r.preferred_layout_index)}</span>
+                      <button type="button" onClick={() => setR({ preferred_layout_index: null })} className="ml-2 text-slate-500 hover:text-white text-xs">Сбросить</button>
                     </p>
                   )}
                   <div className="border-t border-slate-600 pt-3 mt-3">
                     <h3 className="text-slate-300 font-medium mb-2">Авто-применение рекомендаций AI</h3>
                     <p className="text-slate-400 text-xs mb-2">Cron при CR/CTR ниже порога вызывает AI-рекомендации и применяет первую (title/meta/content). Нужен OpenAI в Настройках. Ключ: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">platform.openai.com/api-keys</a>.</p>
-                    <label className="flex items-center gap-2 text-slate-300 mb-3">
-                      <input type="checkbox" checked={rules.auto_apply_recommendations ?? false} onChange={(e) => updateRulesMut.mutate({ auto_apply_recommendations: e.target.checked })} />
+                    <label className="flex items-center gap-2 text-slate-300 mb-3 cursor-pointer">
+                      <input type="checkbox" checked={!!(r.auto_apply_recommendations ?? false)} onChange={(e) => setR({ auto_apply_recommendations: e.target.checked })} className="cursor-pointer" />
                       Включить авто-применение
                     </label>
-                    {(rules.auto_apply_recommendations ?? false) && (
+                    {(r.auto_apply_recommendations ?? false) && (
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Порог CR (%) — применять если ниже</label>
-                          <input type="number" step={0.1} value={rules.auto_apply_cr_threshold_percent ?? 1.5} onChange={(e) => updateRulesMut.mutate({ auto_apply_cr_threshold_percent: parseFloat(e.target.value) || 1.5 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" step={0.1} value={r.auto_apply_cr_threshold_percent ?? 1.5} onChange={(e) => setR({ auto_apply_cr_threshold_percent: parseFloat(e.target.value) || 1.5 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Порог CTR (%) — применять если ниже</label>
-                          <input type="number" step={0.1} value={rules.auto_apply_ctr_threshold_percent ?? 2} onChange={(e) => updateRulesMut.mutate({ auto_apply_ctr_threshold_percent: parseFloat(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" step={0.1} value={r.auto_apply_ctr_threshold_percent ?? 2} onChange={(e) => setR({ auto_apply_ctr_threshold_percent: parseFloat(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Мин. кликов за период</label>
-                          <input type="number" value={rules.auto_apply_min_clicks ?? 30} onChange={(e) => updateRulesMut.mutate({ auto_apply_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" value={r.auto_apply_min_clicks ?? 30} onChange={(e) => setR({ auto_apply_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Мин. показов</label>
-                          <input type="number" value={rules.auto_apply_min_impressions ?? 100} onChange={(e) => updateRulesMut.mutate({ auto_apply_min_impressions: parseInt(e.target.value) || 100 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" value={r.auto_apply_min_impressions ?? 100} onChange={(e) => setR({ auto_apply_min_impressions: parseInt(e.target.value) || 100 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                       </div>
                     )}
@@ -535,25 +554,26 @@ export default function Campaigns() {
                   <div className="border-t border-slate-600 pt-3 mt-3">
                     <h3 className="text-slate-300 font-medium mb-2">Ранний стоп (прибыль на 2–3 день)</h3>
                     <p className="text-slate-400 text-xs mb-2">Автопауза дорвеев, задеплоенных недавно: есть трафик, но 0 конверсий. Крон run-all вызывает это правило.</p>
-                    <label className="flex items-center gap-2 text-slate-300 mb-3">
-                      <input type="checkbox" checked={rules.early_pause_enabled !== false} onChange={(e) => updateRulesMut.mutate({ early_pause_enabled: e.target.checked })} />
+                    <label className="flex items-center gap-2 text-slate-300 mb-3 cursor-pointer">
+                      <input type="checkbox" checked={r.early_pause_enabled !== false} onChange={(e) => setR({ early_pause_enabled: e.target.checked })} className="cursor-pointer" />
                       Включить ранний стоп
                     </label>
-                    {(rules.early_pause_enabled !== false) && (
+                    {(r.early_pause_enabled !== false) && (
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Период (дней) — дорвеи задеплоены за</label>
-                          <input type="number" min={1} max={7} value={rules.early_pause_min_days ?? 2} onChange={(e) => updateRulesMut.mutate({ early_pause_min_days: parseInt(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" min={1} max={7} value={r.early_pause_min_days ?? 2} onChange={(e) => setR({ early_pause_min_days: parseInt(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Мин. кликов — паузить если 0 конверсий при ≥</label>
-                          <input type="number" min={10} max={200} value={rules.early_pause_min_clicks ?? 30} onChange={(e) => updateRulesMut.mutate({ early_pause_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" min={10} max={200} value={r.early_pause_min_clicks ?? 30} onChange={(e) => setR({ early_pause_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                       </div>
                     )}
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </div>
