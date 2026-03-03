@@ -1,4 +1,5 @@
 """Rules builder API - structured affiliate_rules for campaigns."""
+import copy
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -156,9 +157,10 @@ async def update_rules(campaign_id: int, data: RulesBuilder, current_user: Curre
             rules["early_pause"]["enabled"] = data.early_pause_enabled
         if data.early_pause_min_days is not None:
             rules["early_pause"]["min_days"] = data.early_pause_min_days
-        if data.early_pause_min_clicks is not None:
-            rules["early_pause"]["min_clicks"] = data.early_pause_min_clicks
-    c.affiliate_rules = rules
+    if data.early_pause_min_clicks is not None:
+        rules["early_pause"]["min_clicks"] = data.early_pause_min_clicks
+    # Глубокое копирование, чтобы ORM зафиксировал изменение JSON-поля (при мутации вложенных dict объект мог не помечаться как изменённый)
+    c.affiliate_rules = copy.deepcopy(rules)
     await db.commit()
     return {"status": "ok"}
 

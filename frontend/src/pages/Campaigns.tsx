@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -45,6 +45,7 @@ export default function Campaigns() {
   const [edit, setEdit] = useState<Campaign | null>(null);
   const [showActionsHelp, setShowActionsHelp] = useState(false);
   const [rulesForm, setRulesForm] = useState<Record<string, unknown> | null>(null);
+  const rulesSyncedForCampaignIdRef = useRef<number | null>(null);
   const [form, setForm] = useState({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" });
   const [convForm, setConvForm] = useState({
     urgency_text: "",
@@ -151,7 +152,7 @@ export default function Campaigns() {
       const current = qc.getQueryData(["rules", rulesCampaignId]) as Record<string, unknown> | undefined;
       if (current != null && variables && typeof variables === "object")
         qc.setQueryData(["rules", rulesCampaignId], { ...current, ...variables });
-      qc.invalidateQueries({ queryKey: ["rules", rulesCampaignId] });
+      // Не делаем invalidateQueries — иначе refetch перезапишет rules и useEffect снова подставит старые данные в rulesForm, галочки вернутся
       toast.success("Правила сохранены");
     },
   });
@@ -186,7 +187,13 @@ export default function Campaigns() {
   }, [conversion]);
 
   useEffect(() => {
-    if (!rulesCampaignId || !rules) return;
+    if (!rulesCampaignId) {
+      rulesSyncedForCampaignIdRef.current = null;
+      return;
+    }
+    if (!rules) return;
+    if (rulesSyncedForCampaignIdRef.current === rulesCampaignId) return;
+    rulesSyncedForCampaignIdRef.current = rulesCampaignId;
     setRulesForm({
       ...rules,
       require_disclaimer: rules.require_disclaimer ?? false,
