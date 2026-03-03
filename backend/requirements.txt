@@ -37,8 +37,8 @@ paramiko==3.4.0
 google-api-python-client==2.116.0
 google-auth==2.27.0
 
-# Google Ads API (официальный клиент для подсказок ключей; 24.x даёт 501 GRPC method can't be resolved)
-google-ads>=26.0.0
+# Google Ads API (официальный клиент; v18+ нужен для GenerateKeywordIdeas — в 26.x только v17, в 29.x — v23)
+google-ads>=29.0.0
 
 # ML
 scikit-learn==1.4.0

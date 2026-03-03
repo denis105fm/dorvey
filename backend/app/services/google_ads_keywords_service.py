@@ -124,7 +124,7 @@ def _create_test_client_sync(
         "login_customer_id": manager_id,
     }
     try:
-        client = GoogleAdsClient.load_from_dict(config)
+        client = GoogleAdsClient.load_from_dict(config, version="v23")
     except Exception as e:
         return None, f"Ошибка инициализации клиента: {str(e)[:200]}"
 
@@ -229,8 +229,8 @@ def _fetch_keywords_via_official_client(
     if not use_customer_id:
         raise ValueError("customer_id required for official client")
 
-    # Версию API не задаём — используем default из библиотеки (совместимый с установленной google-ads)
-    client = GoogleAdsClient.load_from_dict(config)
+    # Явная версия API: v17 даёт 501 GRPC; библиотека 29.x поддерживает v23
+    client = GoogleAdsClient.load_from_dict(config, version="v23")
     geo_id = _country_to_geo_id(country)
     keywords_seed = [s.strip() for s in seed.split(",") if (s or "").strip()][:10]
     if not keywords_seed:
@@ -350,7 +350,11 @@ async def fetch_keywords_for_keywords(
 
     access_token, token_err = await _get_access_token(cid, secret, refresh)
     if not access_token:
-        return [], {"message": token_err or "Не удалось получить access_token"}
+        msg = token_err or "Не удалось получить access_token"
+        err_lower = (msg or "").strip().lower()
+        if "bad request" in err_lower or "invalid_grant" in err_lower or "invalid request" in err_lower:
+            msg = "Refresh Token не подходит к текущему Client ID. Если вы недавно исправили Client ID в настройках, нажмите «Получить refresh token» заново (войдите в Google) и сохраните настройки — затем снова подтяните ключи."
+        return [], {"message": msg}
 
     # Customer ID: из параметра (настройки) или первый из listAccessibleCustomers
     use_customer_id = _normalize_customer_id(customer_id) if customer_id else None
