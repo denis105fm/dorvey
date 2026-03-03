@@ -437,3 +437,64 @@ async def batch_delete_doorways(
     await db.execute(delete(Doorway).where(Doorway.id.in_(ids)))
     await db.commit()
     return {"deleted": len(ids), "message": f"Удалено дорвеев: {len(ids)}"}
+
+
+class BatchQualityCheckRequest(BaseModel):
+    doorway_ids: List[int]
+
+
+@router.post("/batch-quality-check")
+async def batch_quality_check(
+    data: BatchQualityCheckRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Пакетная проверка качества выбранных дорвеев (то же, что Quality по одному)."""
+    if not data.doorway_ids:
+        return {"results": []}
+    from app.models.keyword import Keyword
+    from app.services.anti_detection import check_content_quality
+
+    result = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign)
+        .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
+    )
+    rows = result.all()
+    kw_r = await db.execute(
+        select(Keyword.campaign_id, Keyword.keyword).where(
+            Keyword.campaign_id.in_(list({r[1].id for r in rows}))
+        )
+    )
+    kw_by_camp = {}
+    for camp_id, kw in kw_r.all():
+        if camp_id not in kw_by_camp:
+            kw_by_camp[camp_id] = kw
+    out = []
+    for doorway, campaign in rows:
+        keyword = kw_by_camp.get(doorway.campaign_id)
+        r = check_content_quality(
+            title=doorway.title or "",
+            meta_description=doorway.meta_description or "",
+            content=doorway.content or "",
+            keyword=keyword,
+        )
+        errors = list(r.errors)
+        warnings = list(r.warnings)
+        if not (campaign.affiliate_url or "").strip():
+            errors.append("Кампания без affiliate URL — CTA не будет работать")
+        cr = doorway.cloaking_rules or {}
+        camp_settings = (campaign.affiliate_rules or {}).get("settings") or {}
+        if not (cr.get("urgency_block") or camp_settings.get("urgency_block")) and not cr.get("social_proof"):
+            warnings.append("Нет urgency или social proof — можно добавить в Конверсию")
+        if not cr.get("faq_qa"):
+            warnings.append("Нет FAQ — можно сгенерировать при создании дорвея")
+        out.append({
+            "doorway_id": doorway.id,
+            "path": doorway.path,
+            "title": (doorway.title or "")[:60],
+            "ok": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+        })
+    return {"results": out}

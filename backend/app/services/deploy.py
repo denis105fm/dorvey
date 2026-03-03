@@ -527,6 +527,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         get_social_proof_preset,
         get_exit_intent_preset,
         get_cta_preset,
+        get_doorway_ui_strings,
     )
     from app.services.anti_detection import get_schema_variant, _seed_from_url
     from app.services.seo_tools import get_internal_links_suggestions
@@ -651,9 +652,17 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     comparison_table = None
     camp_show_table = camp_settings.get("show_offers_table", False)
     offers_for_table = [o for o in offers if o.get("name") or o.get("rate") or o.get("amount") or o.get("term")]
+    ui_table = get_doorway_ui_strings(camp.language or "en")
     if not offers_for_table and offers:
-        offers_for_table = [dict(o, name=o.get("name") or f"Вариант {i+1}") for i, o in enumerate(offers[:5])]
+        offers_for_table = [dict(o, name=o.get("name") or f"{ui_table.get('option_label', 'Option')} {i+1}") for i, o in enumerate(offers[:5])]
     if camp_show_table and offers_for_table:
+        n_h, r_h, a_h, t_h, apply_t = (
+            ui_table.get("table_name", "Name"),
+            ui_table.get("table_rate", "Rate"),
+            ui_table.get("table_amount", "Amount"),
+            ui_table.get("table_term", "Term"),
+            ui_table.get("table_apply", "Apply"),
+        )
         rows = []
         for o in offers_for_table[:5]:
             url_with_sub = _append_sub_id(o["url"], dw.id, o.get("id"))
@@ -661,10 +670,10 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
             rate = html.escape((o.get("rate") or "").strip() or "—")
             amount = html.escape((o.get("amount") or "").strip() or "—")
             term = html.escape((o.get("term") or "").strip() or "—")
-            link = f'<a href="{html.escape(url_with_sub)}" class="cta" rel="nofollow">Оформить</a>' if url_with_sub else "—"
+            link = f'<a href="{html.escape(url_with_sub)}" class="cta" rel="nofollow">{html.escape(apply_t)}</a>' if url_with_sub else "—"
             rows.append(f"<tr><td>{name}</td><td>{rate}</td><td>{amount}</td><td>{term}</td><td>{link}</td></tr>")
         comparison_table = (
-            "<table><thead><tr><th>Название</th><th>Ставка</th><th>Сумма</th><th>Срок</th><th></th></tr></thead>"
+            f"<table><thead><tr><th>{html.escape(n_h)}</th><th>{html.escape(r_h)}</th><th>{html.escape(a_h)}</th><th>{html.escape(t_h)}</th><th></th></tr></thead>"
             "<tbody>" + "".join(rows) + "</tbody></table>"
         )
 

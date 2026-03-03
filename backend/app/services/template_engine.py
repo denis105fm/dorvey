@@ -95,6 +95,7 @@ def _build_main_content(
     cta_footer: bool = True,
     faq_block: Optional[str] = None,
     internal_links_block: Optional[str] = None,
+    default_cta: str = "Learn more",
 ) -> str:
     """Assemble body blocks in given order (structural randomization)."""
     cta_html = ""
@@ -109,14 +110,14 @@ def _build_main_content(
         else:
             cta_html = (
                 f'<p><a href="{affiliate_url}" class="{cta_class}" rel="nofollow">'
-                f"{cta_desktop or cta_mobile or 'Узнать подробнее'}</a></p>"
+                f"{cta_desktop or cta_mobile or default_cta}</a></p>"
             )
     cta_footer_html = ""
     if affiliate_url and cta_footer:
         cta_footer_html = (
             f'<div class="cta-footer-wrap cta-footer-sticky">'
             f'<p><a href="{affiliate_url}" class="{cta_class} cta-footer-btn" rel="nofollow">'
-            f"{cta_desktop or cta_mobile or 'Узнать подробнее'}</a></p></div>"
+            f"{cta_desktop or cta_mobile or default_cta}</a></p></div>"
         )
     blocks: dict = {
         "content": content or "",
@@ -179,6 +180,12 @@ def render_doorway_page(
     block order and layout randomization for anti-detection.
     """
     from app.services.anti_detection import get_layout_variant, shuffle_block_order
+    from app.services.schema_helper import get_doorway_ui_strings
+
+    lang = (language or "en").lower()[:2]
+    ui = get_doorway_ui_strings(lang)
+    def _js(s: str) -> str:
+        return (s or "").replace("\\", "\\\\").replace("'", "\\'").replace("\r", "").replace("\n", " ")
 
     block_order = DEFAULT_BLOCKS.copy()
     layout_idx = 0
@@ -209,6 +216,7 @@ def render_doorway_page(
         cta_footer=cta_footer,
         faq_block=faq_block,
         internal_links_block=internal_links_block,
+        default_cta=ui.get("default_cta", "Learn more"),
     )
     body_class = css_variant["main"]
 
@@ -220,15 +228,15 @@ def render_doorway_page(
         vapid_esc = (vapid_public_key or "").replace("\\", "\\\\").replace("'", "\\'")
         push_block = f'''<div id="dv-push-modal" class="dv-push-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;">
 <div class="dv-push-box" style="background:#fff;border-radius:12px;padding:1.75rem;max-width:360px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);text-align:center;margin:1rem;">
-<p style="margin:0 0 0.5rem;font-size:1.25rem;font-weight:600;color:#111;">🔥 Не пропустите выгодное предложение!</p>
-<p style="margin:0 0 1.25rem;font-size:0.95rem;color:#555;line-height:1.5;">Разрешите уведомления — первыми узнаете о скидках и специальных условиях.</p>
-<button type="button" id="dv-push-btn" class="cta" style="width:100%;padding:0.9rem 1.5rem;font-size:1rem;font-weight:600;margin:0 0 0.5rem;">Разрешить уведомления</button>
+<p style="margin:0 0 0.5rem;font-size:1.25rem;font-weight:600;color:#111;">{ui.get("push_title", "Don't miss out!")}</p>
+<p style="margin:0 0 1.25rem;font-size:0.95rem;color:#555;line-height:1.5;">{ui.get("push_desc", "Allow notifications for deals.")}</p>
+<button type="button" id="dv-push-btn" class="cta" style="width:100%;padding:0.9rem 1.5rem;font-size:1rem;font-weight:600;margin:0 0 0.5rem;">{ui.get("push_btn", "Allow notifications")}</button>
 <p id="dv-push-status" style="margin:0 0 0.5rem;font-size:0.85rem;color:#15803d"></p>
-<a href="#" id="dv-push-later" style="font-size:0.8rem;color:#888;text-decoration:none;">Позже</a>
+<a href="#" id="dv-push-later" style="font-size:0.8rem;color:#888;text-decoration:none;">{ui.get("push_later", "Later")}</a>
 </div>
 </div>
 <div class="push-subscribe-inline" style="margin:1.5rem 0;padding:0.75rem;background:#f0fdf4;border-radius:0.5rem;text-align:center;">
-<button type="button" id="dv-push-btn-inline" class="cta" style="margin:0">🔔 Подписаться на уведомления</button>
+<button type="button" id="dv-push-btn-inline" class="cta" style="margin:0">{ui.get("push_subscribe_btn", "Subscribe to notifications")}</button>
 <p id="dv-push-status-inline" style="margin:0.5rem 0 0;font-size:0.85rem;color:#15803d"></p>
 </div>
 <script>(function(){{
@@ -240,6 +248,10 @@ var btnModal=document.getElementById('dv-push-btn');
 var btnInline=document.getElementById('dv-push-btn-inline');
 var statusEl=document.getElementById('dv-push-status');
 var statusInline=document.getElementById('dv-push-status-inline');
+var txtLoad='{_js(ui.get("push_loading", "Loading..."))}';
+var txtDone='{_js(ui.get("push_done", "Done!"))}';
+var txtDenied='{_js(ui.get("push_denied", "Permission denied"))}';
+var txtSubscribed='{_js(ui.get("push_subscribed", "You\'re subscribed"))}';
 function urlB64ToUint8Array(b64){{
   var padding='='.repeat((4-b64.length%4)%4);
   b64=(b64+padding).replace(/-/g,'+').replace(/_/g,'/');
@@ -250,19 +262,19 @@ function urlB64ToUint8Array(b64){{
 async function doSubscribe(btn,status){{
   try{{
     if(btn)btn.disabled=true;
-    if(status)status.textContent='Загрузка...';
+    if(status)status.textContent=txtLoad;
     var reg=await navigator.serviceWorker.register('/sw_push.js',{{scope:'/'}});
     var perm=await Notification.requestPermission();
-    if(perm!=='granted'){{if(status)status.textContent='Разрешение не дано';if(btn)btn.disabled=false;return;}}
+    if(perm!=='granted'){{if(status)status.textContent=txtDenied;if(btn)btn.disabled=false;return;}}
     var sub=await reg.pushManager.subscribe({{userVisibleOnly:true,applicationServerKey:urlB64ToUint8Array(vapidB64)}});
     var vid=localStorage.getItem('dv_vid')||'v_'+Math.random().toString(36).slice(2)+Date.now();
     localStorage.setItem('dv_vid',vid);
     await fetch(base+'/api/analytics/push-subscribe',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{visitor_id:vid,doorway_id:dw,subscription:sub.toJSON()}})}});
-    if(status)status.textContent='✓ Готово!';
-    if(btn){{btn.textContent='✓ Вы подписаны';btn.disabled=true;}}
+    if(status)status.textContent=txtDone;
+    if(btn){{btn.textContent=txtSubscribed;btn.disabled=true;}}
     if(modal){{modal.style.display='none';}}
     sessionStorage.setItem('dv_push_ok','1');
-  }}catch(e){{if(status)status.textContent='Ошибка: '+e.message;if(btn)btn.disabled=false;}}
+  }}catch(e){{if(status)status.textContent='Error: '+e.message;if(btn)btn.disabled=false;}}
 }}
 function tryShowModal(){{
   if(!('serviceWorker' in navigator)||!('PushManager' in window))return;
@@ -293,33 +305,44 @@ document.addEventListener('mouseout',function(e){{
     if email_capture_enabled and analytics_base and (doorway_id is not None or _dw_id is not None):
         dw_id_email = doorway_id if doorway_id is not None else _dw_id
         base_esc_email = analytics_base.replace("\\", "\\\\").replace("'", "\\'")
+        _email_title = ui.get("email_title", "Get a personal offer")
+        _email_desc = ui.get("email_desc", "Leave your email for best deals.")
+        _email_ph = ui.get("email_placeholder", "your@email.com")
+        _email_btn = ui.get("email_btn", "Send")
+        _email_btn_short = ui.get("email_btn_short", "Get offer")
+        _email_later = ui.get("email_later", "Later")
+        _email_required = _js(ui.get("email_required", "Enter email"))
+        _email_sending = _js(ui.get("email_sending", "Sending..."))
+        _email_done = _js(ui.get("email_done", "Done! Thanks."))
+        _email_error = _js(ui.get("email_error", "Error"))
         email_capture_block = f'''<div id="dv-email-modal" style="display:none;position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;">
 <div style="background:#fff;border-radius:12px;padding:1.75rem;max-width:360px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);margin:1rem;">
-<p style="margin:0 0 0.5rem;font-size:1.25rem;font-weight:600;color:#111;">📧 Получите персональное предложение</p>
-<p style="margin:0 0 1rem;font-size:0.95rem;color:#555;">Оставьте email — пришлём выгодные условия.</p>
-<input type="email" id="dv-email-input" placeholder="your@email.com" style="width:100%;padding:0.75rem;border:1px solid #e5e7eb;border-radius:0.5rem;margin-bottom:0.5rem;box-sizing:border-box;">
+<p style="margin:0 0 0.5rem;font-size:1.25rem;font-weight:600;color:#111;">{_email_title}</p>
+<p style="margin:0 0 1rem;font-size:0.95rem;color:#555;">{_email_desc}</p>
+<input type="email" id="dv-email-input" placeholder="{_email_ph}" style="width:100%;padding:0.75rem;border:1px solid #e5e7eb;border-radius:0.5rem;margin-bottom:0.5rem;box-sizing:border-box;">
 <p id="dv-email-status" style="margin:0 0 0.5rem;font-size:0.85rem;color:#15803d"></p>
-<button type="button" id="dv-email-btn" class="cta" style="width:100%;padding:0.75rem;">Отправить</button>
-<a href="#" id="dv-email-later" style="display:block;text-align:center;margin-top:0.5rem;font-size:0.8rem;color:#888;text-decoration:none;">Позже</a>
+<button type="button" id="dv-email-btn" class="cta" style="width:100%;padding:0.75rem;">{_email_btn}</button>
+<a href="#" id="dv-email-later" style="display:block;text-align:center;margin-top:0.5rem;font-size:0.8rem;color:#888;text-decoration:none;">{_email_later}</a>
 </div>
 </div>
 <div class="email-capture-inline" style="margin:1.5rem 0;padding:0.75rem;background:#fefce8;border-radius:0.5rem;text-align:center;">
-<input type="email" id="dv-email-inline" placeholder="Email для получения предложения" style="max-width:280px;padding:0.5rem 0.75rem;margin-right:0.5rem;border:1px solid #e5e7eb;border-radius:0.5rem;">
-<button type="button" id="dv-email-btn-inline" class="cta" style="padding:0.5rem 1rem;">Получить предложение</button>
+<input type="email" id="dv-email-inline" placeholder="{_email_ph}" style="max-width:280px;padding:0.5rem 0.75rem;margin-right:0.5rem;border:1px solid #e5e7eb;border-radius:0.5rem;">
+<button type="button" id="dv-email-btn-inline" class="cta" style="padding:0.5rem 1rem;">{_email_btn_short}</button>
 <p id="dv-email-status-inline" style="margin:0.5rem 0 0;font-size:0.85rem;color:#15803d"></p>
 </div>
 <script>(function(){{
 var base='{base_esc_email}'; var dw={dw_id_email};
+var txtRequired='{_email_required}'; var txtSending='{_email_sending}'; var txtDone='{_email_done}'; var txtError='{_email_error}';
 function getVid(){{return localStorage.getItem('dv_vid')||'';}}
 function doEmailSubmit(input,btn,status){{
   var email=(input.value||'').trim().toLowerCase();
-  if(!email){{if(status)status.textContent='Введите email';return;}}
-  if(btn)btn.disabled=true; if(status)status.textContent='Отправка...';
+  if(!email){{if(status)status.textContent=txtRequired;return;}}
+  if(btn)btn.disabled=true; if(status)status.textContent=txtSending;
   fetch(base+'/api/analytics/email-capture',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email:email,visitor_id:getVid()||null,doorway_id:dw}})}}).then(function(r){{return r.json();}}).then(function(j){{
     if(j.detail){{if(status)status.textContent=j.detail;if(btn)btn.disabled=false;return;}}
-    if(status)status.textContent='✓ Готово! Спасибо.';if(btn)btn.disabled=true;input.value='';
+    if(status)status.textContent=txtDone;if(btn)btn.disabled=true;input.value='';
     var m=document.getElementById('dv-email-modal');if(m)m.style.display='none';sessionStorage.setItem('dv_email_ok','1');
-  }}).catch(function(){{if(status)status.textContent='Ошибка';if(btn)btn.disabled=false;}});
+  }}).catch(function(){{if(status)status.textContent=txtError;if(btn)btn.disabled=false;}});
 }}
 function tryShowEmailModal(){{
   if(sessionStorage.getItem('dv_email_shown')||sessionStorage.getItem('dv_email_ok'))return;
@@ -354,8 +377,8 @@ var esc2=false;window.addEventListener('scroll',function(){{if(esc2)return;var h
         faq_schema=faq_schema or "",
         article_schema=article_schema or "",
         exit_intent_enabled=bool(exit_intent_enabled),
-        exit_intent_title=exit_intent_title or "",
-        exit_intent_cta=exit_intent_cta or "",
+        exit_intent_title=exit_intent_title or ui.get("exit_default_title", ""),
+        exit_intent_cta=exit_intent_cta or ui.get("exit_default_cta", ""),
         data_offers=data_offers or "",
         doorway_id=doorway_id if doorway_id is not None else (_dw_id or ""),
         push_block=push_block,

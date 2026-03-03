@@ -53,6 +53,7 @@ export default function Doorways() {
   const [cloneDomainId, setCloneDomainId] = useState<number>(0);
   const [clonePath, setClonePath] = useState("/");
   const [selectedDoorwayIds, setSelectedDoorwayIds] = useState<Set<number>>(new Set());
+  const [batchQualityResults, setBatchQualityResults] = useState<Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[] }> | null>(null);
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -142,6 +143,13 @@ export default function Doorways() {
       toast.success(`Удалено дорвеев: ${data.deleted ?? 0}`);
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка удаления"),
+  });
+  const batchQualityMut = useMutation({
+    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-quality-check", { doorway_ids }).then((r) => r.data),
+    onSuccess: (data: { results?: Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[] }> }) => {
+      setBatchQualityResults(data.results ?? []);
+    },
+    onError: () => toast.error("Ошибка проверки"),
   });
   const batchMut = useMutation({
     mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean }) =>
@@ -597,6 +605,15 @@ export default function Doorways() {
                   )}
                   {selectedCount > 0 && (
                     <button
+                      onClick={() => batchQualityMut.mutate(Array.from(selectedDoorwayIds))}
+                      disabled={batchQualityMut.isPending}
+                      className="px-4 py-2 bg-violet-600/80 hover:bg-violet-600 disabled:opacity-50 text-white rounded-lg text-sm"
+                    >
+                      {batchQualityMut.isPending ? "Проверка…" : `Quality выбранных (${selectedCount})`}
+                    </button>
+                  )}
+                  {selectedCount > 0 && (
+                    <button
                       onClick={() => window.confirm(`Удалить выбранные дорвеи (${selectedCount})?`) && batchDeleteMut.mutate(Array.from(selectedDoorwayIds))}
                       disabled={batchDeleteMut.isPending}
                       className="px-4 py-2 bg-red-600/80 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg text-sm"
@@ -957,6 +974,48 @@ export default function Doorways() {
         </div>
       )}
 
+      {batchQualityResults !== null && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setBatchQualityResults(null)}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-4xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-3 flex justify-between">
+              <span>Quality — результаты проверки ({batchQualityResults.length})</span>
+              <button onClick={() => setBatchQualityResults(null)} className="text-slate-400 hover:text-white">✕</button>
+            </h2>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-600 text-slate-400">
+                    <th className="text-left py-2 font-medium">ID</th>
+                    <th className="text-left py-2 font-medium">Путь</th>
+                    <th className="text-left py-2 font-medium">Заголовок</th>
+                    <th className="text-left py-2 font-medium w-20">OK</th>
+                    <th className="text-left py-2 font-medium">Ошибки / предупреждения</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batchQualityResults.map((row) => (
+                    <tr key={row.doorway_id} className="border-b border-slate-700/50">
+                      <td className="py-2 font-mono text-white">{row.doorway_id}</td>
+                      <td className="py-2 text-slate-300">{row.path || "—"}</td>
+                      <td className="py-2 text-slate-400 truncate max-w-[180px]" title={row.title}>{row.title || "—"}</td>
+                      <td className="py-2">{row.ok ? <span className="text-emerald-400">✓</span> : <span className="text-amber-400">⚠</span>}</td>
+                      <td className="py-2">
+                        {row.errors?.length ? <div className="text-red-400 text-xs">{row.errors.join("; ")}</div> : null}
+                        {row.warnings?.length ? <div className="text-amber-400 text-xs mt-0.5">{row.warnings.join("; ")}</div> : null}
+                        {!row.errors?.length && !row.warnings?.length ? <span className="text-slate-500">—</span> : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="pt-3 border-t border-slate-700">
+              <Button variant="secondary" onClick={() => setBatchQualityResults(null)}>Закрыть</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {recsDoorwayId && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setRecsDoorwayId(null)}>
           <div className="bg-slate-800 rounded-xl border border-slate-600 p-5 max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -975,6 +1034,7 @@ export default function Doorways() {
                 <p className="text-slate-500 text-xs mt-3">RPC — выручка на клик. Примените лучший вариант в меню «Варианты A/B» для этого дорвея.</p>
               </div>
             )}
+            <p className="text-slate-500 text-xs mb-3">«Применить» — AI сгенерирует улучшенные title, meta и контент по рекомендации и подставит в дорвей (предыдущая версия сохраняется для Rollback).</p>
             {recs?.length ? (
               <>
                 {recsDoorway?.status === "paused" && pauseRecs?.length ? <p className="text-slate-400 text-xs mb-2">Рекомендации AI</p> : null}

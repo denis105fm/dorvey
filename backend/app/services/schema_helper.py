@@ -190,6 +190,78 @@ def get_cta_preset(lang: str, seed: int) -> dict:
     return variants[seed % len(variants)]
 
 
+# UI strings for doorway page: table, push, email, defaults (by language)
+DOORWAY_UI_RU = {
+    "table_name": "Название",
+    "table_rate": "Ставка",
+    "table_amount": "Сумма",
+    "table_term": "Срок",
+    "table_apply": "Оформить",
+    "option_label": "Вариант",
+    "default_cta": "Узнать подробнее",
+    "exit_default_title": "Подождите! Специальное предложение для вас",
+    "exit_default_cta": "Получить скидку",
+    "push_title": "🔥 Не пропустите выгодное предложение!",
+    "push_desc": "Разрешите уведомления — первыми узнаете о скидках и специальных условиях.",
+    "push_btn": "Разрешить уведомления",
+    "push_subscribe_btn": "🔔 Подписаться на уведомления",
+    "push_later": "Позже",
+    "push_loading": "Загрузка...",
+    "push_done": "✓ Готово!",
+    "push_denied": "Разрешение не дано",
+    "push_subscribed": "✓ Вы подписаны",
+    "email_title": "📧 Получите персональное предложение",
+    "email_desc": "Оставьте email — пришлём выгодные условия.",
+    "email_placeholder": "Email для получения предложения",
+    "email_btn": "Получить предложение",
+    "email_btn_short": "Отправить",
+    "email_later": "Позже",
+    "email_sending": "Отправка...",
+    "email_done": "✓ Готово! Спасибо.",
+    "email_error": "Ошибка",
+    "email_required": "Введите email",
+}
+DOORWAY_UI_EN = {
+    "table_name": "Name",
+    "table_rate": "Rate",
+    "table_amount": "Amount",
+    "table_term": "Term",
+    "table_apply": "Apply",
+    "option_label": "Option",
+    "default_cta": "Learn more",
+    "exit_default_title": "Wait! Special offer for you",
+    "exit_default_cta": "Get discount",
+    "push_title": "🔥 Don't miss out on great offers!",
+    "push_desc": "Allow notifications — be the first to know about deals and special conditions.",
+    "push_btn": "Allow notifications",
+    "push_subscribe_btn": "🔔 Subscribe to notifications",
+    "push_later": "Later",
+    "push_loading": "Loading...",
+    "push_done": "✓ Done!",
+    "push_denied": "Permission denied",
+    "push_subscribed": "✓ You're subscribed",
+    "email_title": "📧 Get a personalized offer",
+    "email_desc": "Leave your email — we'll send you the best conditions.",
+    "email_placeholder": "Email for offers",
+    "email_btn": "Get offer",
+    "email_btn_short": "Submit",
+    "email_later": "Later",
+    "email_sending": "Sending...",
+    "email_done": "✓ Done! Thank you.",
+    "email_error": "Error",
+    "email_required": "Enter your email",
+}
+DOORWAY_UI_BY_LANG = {"ru": DOORWAY_UI_RU, "en": DOORWAY_UI_EN}
+for _k in ["de", "es", "pl", "fr", "pt"]:
+    DOORWAY_UI_BY_LANG.setdefault(_k, DOORWAY_UI_EN)
+
+
+def get_doorway_ui_strings(lang: str) -> dict:
+    """Return localized UI strings for doorway page (table, push, email, defaults). Fallback: en for non-ru."""
+    key = (lang or "en").lower()[:2]
+    return DOORWAY_UI_BY_LANG.get(key, DOORWAY_UI_EN).copy()
+
+
 def build_trust_elements_html(lang: str = "ru", seed: Optional[int] = None) -> str:
     """Trust badges HTML. Variants reduce structural fingerprint."""
     lang_key = (lang or "ru").lower()[:2]

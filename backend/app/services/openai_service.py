@@ -39,6 +39,7 @@ class OpenAIService:
         region: str = "RU",
         affiliate_url: Optional[str] = None,
         forbidden_words: Optional[list[str]] = None,
+        external_context: Optional[str] = None,
         tone: str = "informative",
         api_key_override: Optional[str] = None,
     ) -> dict[str, str]:
@@ -56,12 +57,15 @@ class OpenAIService:
 - meta_description: 140-160 символов, призыв к действию
 - content: валидный HTML. <p>, <h1>. Без лишних div
 {forbidden_str}
+Если в запросе пользователя дан контекст по региону (сезонность, актуальные темы) — можешь мягко учесть в заголовке или в одном предложении в тексте. Не перегружай: одно упоминание или тон достаточно. Контент должен оставаться про ключевой запрос.
 
 Ответ — только валидный JSON: {{"title": "...", "meta_description": "...", "content": "..."}}"""
 
         user_prompt = f'Ключевой запрос: "{keyword}"'
         if affiliate_url:
             user_prompt += f"\nСсылка оффера: {affiliate_url}"
+        if external_context and external_context.strip():
+            user_prompt += f"\n\nКонтекст по региону (использовать по желанию, не перегружать):\n{external_context.strip()}"
 
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
