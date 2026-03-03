@@ -136,6 +136,16 @@ export default function Campaigns() {
   });
   const updateRulesMut = useMutation({
     mutationFn: (data: Record<string, unknown>) => api.put(`/rules/campaign/${rulesCampaignId}`, data).then((r) => r.data),
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: ["rules", rulesCampaignId] });
+      const prev = qc.getQueryData(["rules", rulesCampaignId]) as Record<string, unknown> | undefined;
+      if (prev) qc.setQueryData(["rules", rulesCampaignId], { ...prev, ...patch });
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["rules", rulesCampaignId], ctx.prev);
+      toast.error("Не удалось сохранить правила");
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules", rulesCampaignId] }); toast.success("Правила сохранены"); },
   });
   const setPreferredLayoutMut = useMutation({
