@@ -146,7 +146,13 @@ export default function Campaigns() {
       if (ctx?.prev) qc.setQueryData(["rules", rulesCampaignId], ctx.prev);
       toast.error("Не удалось сохранить правила");
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules", rulesCampaignId] }); toast.success("Правила сохранены"); },
+    onSuccess: (_data, variables) => {
+      const current = qc.getQueryData(["rules", rulesCampaignId]) as Record<string, unknown> | undefined;
+      if (current != null && variables && typeof variables === "object")
+        qc.setQueryData(["rules", rulesCampaignId], { ...current, ...variables });
+      qc.invalidateQueries({ queryKey: ["rules", rulesCampaignId] });
+      toast.success("Правила сохранены");
+    },
   });
   const setPreferredLayoutMut = useMutation({
     mutationFn: ({ campaignId, layoutIndex }: { campaignId: number; layoutIndex: number }) =>
