@@ -64,9 +64,19 @@ export default function Keywords() {
   const startupKwMut = useMutation({
     mutationFn: (d: { seeds: string[]; country: string; limit_per_seed: number; campaign_id?: number; auto_import: boolean }) =>
       api.post("/keywords/startup-keywords", d).then((r) => r.data),
-    onSuccess: (data) => {
+    onSuccess: (data: { keywords?: unknown[]; imported?: number; hint?: string; debug?: Record<string, unknown> }) => {
       qc.invalidateQueries({ queryKey: ["keywords", campaignId] });
-      toast.success(data.imported ? `Подтянуто ключей: ${data.keywords?.length ?? 0}, импортировано: ${data.imported}` : `Подтянуто ключей: ${data.keywords?.length ?? 0}`);
+      const count = data.keywords?.length ?? 0;
+      if (count === 0 && data.hint) {
+        toast.warning(data.hint);
+        if (data.debug) console.warn("Провайдер подсказок (debug):", data.debug);
+      } else if (data.imported && data.imported > 0) {
+        toast.success(`Подтянуто ключей: ${count}, импортировано: ${data.imported}`);
+      } else if (count > 0) {
+        toast.success(`Подтянуто ключей: ${count}`);
+      } else {
+        toast.info("Подтянуто ключей: 0. Проверьте Настройки → провайдер подсказок и учётные данные.");
+      }
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
   });

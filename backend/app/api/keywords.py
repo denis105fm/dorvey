@@ -305,20 +305,26 @@ async def fetch_startup_keywords(
         )
     provider, c = creds
     merged: dict[str, dict] = {}
+    last_hint: str | None = None
+    last_debug: dict | None = None
     for seed in (data.seeds or [])[:10]:
         seed = (seed or "").strip()
         if not seed:
             continue
         if provider == "dataforseo":
             kws = await dataforseo_fetch(c["login"], c["password"], seed=seed, country=data.country, limit=data.limit_per_seed)
+            debug = None
         elif provider == "fetchserp":
-            kws, _ = await fetchserp_fetch(c["api_key"], seed=seed, country=data.country, limit=data.limit_per_seed)
+            kws, debug = await fetchserp_fetch(c["api_key"], seed=seed, country=data.country, limit=data.limit_per_seed)
         else:
-            kws, _ = await google_ads_fetch(
+            kws, debug = await google_ads_fetch(
                 c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
                 seed=seed, country=data.country, limit=data.limit_per_seed,
                 customer_id=c.get("customer_id"),
             )
+        if debug:
+            last_debug = debug
+            last_hint = debug.get("message") or debug.get("api_error") or (str(debug)[:200] if debug else None)
         for kw in kws:
             key_lower = kw["keyword"].lower()
             if key_lower not in merged or (kw.get("volume") or 0) > (merged[key_lower].get("volume") or 0):
@@ -348,7 +354,12 @@ async def fetch_startup_keywords(
                 existing_lower.add(item["keyword"].strip().lower())
             await db.commit()
 
-    return {"keywords": keywords, "source": provider, "imported": imported}
+    out: dict = {"keywords": keywords, "source": provider, "imported": imported}
+    if not keywords and last_hint:
+        out["hint"] = last_hint
+    if not keywords and last_debug:
+        out["debug"] = last_debug
+    return out
 
 
 class AutoPullImportRequest(BaseModel):
@@ -432,13 +443,17 @@ async def auto_pull_and_import(
         elif provider == "google_ads" and fetchserp_debug:
             result["debug"] = fetchserp_debug
             msg = fetchserp_debug.get("message") or ""
-            api_err = fetchserp_debug.get("api_error")
-            if api_err:
-                msg = f"{msg} {api_err}".strip() if msg else str(api_err)[:300]
-            if fetchserp_debug.get("http_status") not in (None, 200):
-                msg = f"HTTP {fetchserp_debug.get('http_status')}: {msg}".strip()
-            if msg:
+            # Не дополняем сырым api_error, если уже есть понятное сообщение (напр. про test accounts)
+            if msg and ("тестовых аккаунтов" in msg or "Basic или Standard" in msg):
                 result["hint"] = msg
+            else:
+                api_err = fetchserp_debug.get("api_error")
+                if api_err:
+                    msg = f"{msg} {api_err}".strip() if msg else str(api_err)[:300]
+                if fetchserp_debug.get("http_status") not in (None, 200):
+                    msg = f"HTTP {fetchserp_debug.get('http_status')}: {msg}".strip()
+                if msg:
+                    result["hint"] = msg
         elif fetchserp_debug and (fetchserp_debug.get("api_error") or fetchserp_debug.get("message")):
             result["debug"] = fetchserp_debug
             result["hint"] = fetchserp_debug.get("message") or fetchserp_debug.get("api_error", "")[:300]
