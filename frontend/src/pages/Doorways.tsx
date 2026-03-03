@@ -127,7 +127,7 @@ export default function Doorways() {
   });
   const batchMut = useMutation({
     mutationFn: (items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]) =>
-      api.post("/doorways/generate-batch", { items }).then((r) => r.data),
+      api.post("/doorways/generate-batch", { items }, { timeout: 600000 }).then((r) => r.data),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["doorways"] });
       const errors = (data.results || []).filter((r: { status?: string }) => r.status === "error");
