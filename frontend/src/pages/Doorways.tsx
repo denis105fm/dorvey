@@ -135,8 +135,9 @@ export default function Doorways() {
       if (errors.length > 0 && data.created === 0) toast.error((errors[0] as { error?: string })?.error ?? "Ошибка по ключам");
       else if (errors.length > 0) toast.warning(`Часть ключей с ошибками: ${(errors[0] as { error?: string })?.error}`);
     },
-    onError: (e: { response?: { data?: { detail?: string } }; message?: string }) => {
-      const msg = e?.response?.data?.detail ?? e?.response?.data?.message ?? e?.message ?? "Ошибка пакетной генерации";
+    onError: (e: { response?: { data?: { detail?: string; message?: string } }; message?: string }) => {
+      const data = e?.response?.data as { detail?: string; message?: string } | undefined;
+      const msg = data?.detail ?? data?.message ?? e?.message ?? "Ошибка пакетной генерации";
       toast.error(typeof msg === "string" ? msg : "Ошибка пакетной генерации");
     },
   });
@@ -421,7 +422,7 @@ export default function Doorways() {
                 </Button>
                 {batchMut.data && <p className="mt-2 text-slate-400 text-sm">Создано: {batchMut.data.created}</p>}
                 {batchMut.data?.results?.some((r: { status?: string }) => r.status === "error") && (
-                  <p className="mt-1 text-amber-400 text-sm">Первая ошибка: {(batchMut.data.results as { error?: string }[]).find((r: { status?: string }) => r.status === "error")?.error}</p>
+                  <p className="mt-1 text-amber-400 text-sm">Первая ошибка: {(batchMut.data.results as Array<{ status?: string; error?: string }>).find((r) => r.status === "error")?.error}</p>
                 )}
               </div>
               <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки).</p>
