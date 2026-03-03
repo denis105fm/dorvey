@@ -362,8 +362,14 @@ async def fetch_keywords_for_keywords(
     if not use_customer_id:
         return [], {"message": "Нет доступного рекламного аккаунта Google Ads."}
 
-    # Сначала пробуем официальную библиотеку google-ads (корректный формат запроса)
+    # Для тестового токена при запросе к конкретному customer_id обязательно нужен MCC, иначе API вернёт PERMISSION_DENIED
     login_id = _normalize_customer_id(manager_customer_id) if manager_customer_id else None
+    if use_customer_id and not login_id:
+        return [], {
+            "message": "Для подсказки ключей по выбранному аккаунту нужен Manager account ID (MCC). Заполните поле «Manager account ID (MCC)» в Настройках (например 185-780-6498), нажмите сохранение или «Проверить», затем снова подтяните ключи.",
+        }
+
+    # Сначала пробуем официальную библиотеку google-ads (корректный формат запроса)
     try:
         out, debug = await asyncio.to_thread(
             _fetch_keywords_via_official_client,
@@ -428,7 +434,7 @@ async def fetch_keywords_for_keywords(
         )
         if is_permission_denied:
             return [], {
-                "message": "Developer Token в режиме Test работает только с тестовыми аккаунтами. Укажите в Настройках поле «Manager account ID (MCC)» — ID вашего тестового MCC (например 185-780-6498). Customer ID — дочерний аккаунт под этим MCC.",
+                "message": "Developer Token в режиме Test работает только с дочерними аккаунтами вашего MCC. Убедитесь: 1) В поле Manager account ID (MCC) указан 185-780-6498. 2) В поле Customer ID указан именно дочерний аккаунт из раздела «Настройки дочерних аккаунтов» этого MCC (например 403-443-4560), а не другой аккаунт из переключателя (например 704-609-6309). Сохраните настройки и попробуйте снова.",
                 "api_error": err_str[:500],
             }
         return [], {
