@@ -5,13 +5,12 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.api.deps import CurrentUser
 from app.core.database import get_db
-from app.models.doorway import Doorway
+from app.models.doorway import Doorway, DoorwayVersion, DoorwayMetrics
 from app.models.campaign import Campaign
-from app.models.doorway import DoorwayVersion
 from app.schemas.doorway import (
     DoorwayCreate,
     DoorwayUpdate,
@@ -396,6 +395,12 @@ async def delete_doorway(
     doorway = result.scalar_one_or_none()
     if not doorway:
         raise HTTPException(status_code=404, detail="Doorway not found")
+    from app.models.doorway_source_metrics import DoorwaySourceMetrics
+    from app.models.ab_variant import DoorwayABVariant
+    await db.execute(delete(DoorwayVersion).where(DoorwayVersion.doorway_id == doorway_id))
+    await db.execute(delete(DoorwayMetrics).where(DoorwayMetrics.doorway_id == doorway_id))
+    await db.execute(delete(DoorwaySourceMetrics).where(DoorwaySourceMetrics.doorway_id == doorway_id))
+    await db.execute(delete(DoorwayABVariant).where(DoorwayABVariant.doorway_id == doorway_id))
     await db.delete(doorway)
     await db.commit()
     return None
@@ -413,13 +418,22 @@ async def batch_delete_doorways(
 ):
     if not data.doorway_ids:
         return {"deleted": 0, "message": "Нет выбранных дорвеев"}
+    # Только дорвеи текущего пользователя (через кампанию)
     result = await db.execute(
-        select(Doorway)
+        select(Doorway.id)
         .join(Campaign)
         .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
     )
-    doorways = result.scalars().all()
-    for dw in doorways:
-        await db.delete(dw)
+    ids = [row[0] for row in result.all()]
+    if not ids:
+        return {"deleted": 0, "message": "Нет доступных дорвеев для удаления"}
+    # Сначала удаляем связанные записи (FK без CASCADE)
+    from app.models.doorway_source_metrics import DoorwaySourceMetrics
+    from app.models.ab_variant import DoorwayABVariant
+    await db.execute(delete(DoorwayVersion).where(DoorwayVersion.doorway_id.in_(ids)))
+    await db.execute(delete(DoorwayMetrics).where(DoorwayMetrics.doorway_id.in_(ids)))
+    await db.execute(delete(DoorwaySourceMetrics).where(DoorwaySourceMetrics.doorway_id.in_(ids)))
+    await db.execute(delete(DoorwayABVariant).where(DoorwayABVariant.doorway_id.in_(ids)))
+    await db.execute(delete(Doorway).where(Doorway.id.in_(ids)))
     await db.commit()
-    return {"deleted": len(doorways), "message": f"Удалено дорвеев: {len(doorways)}"}
+    return {"deleted": len(ids), "message": f"Удалено дорвеев: {len(ids)}"}
