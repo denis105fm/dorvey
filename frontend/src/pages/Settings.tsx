@@ -47,6 +47,7 @@ type IntegrationsData = {
   google_ads_client_secret?: string | null;
   google_ads_refresh_token?: string | null;
   google_ads_customer_id?: string | null;
+  google_ads_manager_customer_id?: string | null;
 };
 
 const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
@@ -617,6 +618,7 @@ export default function Settings() {
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Developer Token</label>
+                  <p className="text-slate-500 text-xs mb-1">Где взять: Google Ads (<a href="https://ads.google.com" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">ads.google.com</a>) → Инструменты и настройки (иконка шестерёнки) → Настройки → API Center. Для тестовых аккаунтов нужен режим <strong>Test</strong>; Basic/Standard — после одобрения заявки.</p>
                   <div className="relative flex">
                     <input
                       type={showGoogleAdsDevToken ? "text" : "password"}
@@ -632,6 +634,7 @@ export default function Settings() {
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Client ID (OAuth)</label>
+                  <p className="text-slate-500 text-xs mb-1">Где взять: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Google Cloud Console → APIs &amp; Services → Credentials</a>. Создайте OAuth 2.0 Client (тип Desktop или Web). Client ID — строка вида <code className="bg-slate-700 px-1 rounded">xxx.apps.googleusercontent.com</code>.</p>
                   <input
                     value={integrations.google_ads_client_id ?? ""}
                     onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_client_id: e.target.value }))}
@@ -656,6 +659,7 @@ export default function Settings() {
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Refresh Token (OAuth)</label>
+                  <p className="text-slate-500 text-xs mb-1">Не скачивается вручную: нажмите «Получить refresh token», войдите в Google — токен сохранится автоматически. Нужны сохранённые Client ID и Client Secret.</p>
                   <div className="flex gap-2">
                     <div className="relative flex flex-1">
                       <input
@@ -707,6 +711,7 @@ export default function Settings() {
                 </div>
                 <div>
                   <label className="block text-slate-400 text-sm mb-1">Customer ID (необязательно)</label>
+                  <p className="text-slate-500 text-xs mb-1">ID рекламного аккаунта (без дефисов или 123-456-7890). Для подсказок ключей используется этот аккаунт; если пусто — берётся первый доступный. Тестовый аккаунт можно создать кнопкой ниже (под тестовым MCC).</p>
                   <input
                     type="text"
                     value={integrations.google_ads_customer_id ?? ""}
@@ -714,7 +719,17 @@ export default function Settings() {
                     placeholder="123-456-7890"
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
-                  <p className="text-slate-500 text-xs mt-1">Для подсказок ключей используется этот рекламный аккаунт. Если пусто — берётся первый доступный.</p>
+                  <p className="text-slate-500 text-xs mt-1">
+                    <strong>Manager account ID (MCC)</strong> — если используете тестовый Developer Token и дочерний аккаунт (как выше), укажите ID тестового MCC, например <code className="bg-slate-700 px-1 rounded">185-780-6498</code>. Без этого подсказки ключей вернут «PERMISSION_DENIED / only test accounts».
+                  </p>
+                  <label className="block text-slate-400 text-xs mt-2 mb-0.5">Manager account ID (MCC)</label>
+                  <input
+                    type="text"
+                    value={integrations.google_ads_manager_customer_id ?? ""}
+                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_manager_customer_id: e.target.value }))}
+                    placeholder="185-780-6498 (MCC)"
+                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
+                  />
                   <p className="text-slate-500 text-xs mt-1">
                     Тестовый менеджер (MCC) создаётся по ссылке:{" "}
                     <a href="https://ads.google.com/nav/selectaccount?sf=mt" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Создать тестовый MCC</a>.
@@ -728,7 +743,7 @@ export default function Settings() {
                       try {
                         const { data } = await api.post<{ customer_id: string; customer_id_formatted: string }>(
                           "/settings/google-ads-create-test-account",
-                          { manager_customer_id: (integrations.google_ads_customer_id ?? "").trim() || undefined }
+                          { manager_customer_id: (integrations.google_ads_manager_customer_id ?? integrations.google_ads_customer_id ?? "").trim() || undefined }
                         );
                         setIntegrations((p) => ({ ...p, google_ads_customer_id: data.customer_id_formatted }));
                         toast.success(`Создан тестовый аккаунт: ${data.customer_id_formatted}. Подставлен в Customer ID.`);

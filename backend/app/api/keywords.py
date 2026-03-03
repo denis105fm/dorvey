@@ -134,6 +134,7 @@ async def suggest_keywords_from_external(
             country=data.country,
             limit=data.limit,
             customer_id=c.get("customer_id"),
+            manager_customer_id=c.get("manager_customer_id"),
         )
     else:
         raise HTTPException(status_code=400, detail=f"Провайдер «{provider}» не поддерживается.")
@@ -181,6 +182,7 @@ async def suggest_keywords_by_offers_geo(
                 c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
                 seed=data.seed, country=country, limit=limit_per_geo,
                 customer_id=c.get("customer_id"),
+                manager_customer_id=c.get("manager_customer_id"),
             )
         for kw in kws:
             key_lower = kw["keyword"].lower()
@@ -321,6 +323,7 @@ async def fetch_startup_keywords(
                 c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
                 seed=seed, country=data.country, limit=data.limit_per_seed,
                 customer_id=c.get("customer_id"),
+                manager_customer_id=c.get("manager_customer_id"),
             )
         if debug:
             last_debug = debug
@@ -404,6 +407,7 @@ async def auto_pull_and_import(
                 c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
                 seed=data.seed, country=data.country, limit=data.limit,
                 customer_id=c.get("customer_id"),
+                manager_customer_id=c.get("manager_customer_id"),
             )
     except Exception as e:
         keywords = []

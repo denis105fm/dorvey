@@ -207,11 +207,12 @@ def _fetch_keywords_via_official_client(
     seed: str,
     country: str,
     limit: int,
+    login_customer_id: str | None = None,
 ) -> tuple[list[dict], dict[str, Any] | None]:
     """
     Синхронный вызов через официальную библиотеку google-ads.
+    login_customer_id — ID MCC (менеджера), обязателен для тестового Developer Token при запросах к дочернему аккаунту.
     Возвращает (list of {keyword, volume, cpc}, debug или None).
-    При любой ошибке выбрасывает исключение — тогда вызывающий сделает fallback на REST.
     """
     from google.ads.googleads.client import GoogleAdsClient
 
@@ -222,10 +223,11 @@ def _fetch_keywords_via_official_client(
         "refresh_token": refresh_token,
         "use_proto_plus": True,
     }
+    if login_customer_id:
+        config["login_customer_id"] = _normalize_customer_id(login_customer_id)
     use_customer_id = _normalize_customer_id(customer_id) or ""
     if not use_customer_id:
         raise ValueError("customer_id required for official client")
-    # login_customer_id не ставим — для одиночного аккаунта даёт 400 Invalid argument
 
     # Версию API не задаём — используем default из библиотеки (совместимый с установленной google-ads)
     client = GoogleAdsClient.load_from_dict(config)
@@ -330,6 +332,7 @@ async def fetch_keywords_for_keywords(
     country: str = "US",
     limit: int = 100,
     customer_id: str | None = None,
+    manager_customer_id: str | None = None,
 ) -> tuple[list[dict], dict[str, Any] | None]:
     """
     Получение идей ключевых слов через Google Ads API (GenerateKeywordIdeas).
@@ -360,6 +363,7 @@ async def fetch_keywords_for_keywords(
         return [], {"message": "Нет доступного рекламного аккаунта Google Ads."}
 
     # Сначала пробуем официальную библиотеку google-ads (корректный формат запроса)
+    login_id = _normalize_customer_id(manager_customer_id) if manager_customer_id else None
     try:
         out, debug = await asyncio.to_thread(
             _fetch_keywords_via_official_client,
@@ -371,6 +375,7 @@ async def fetch_keywords_for_keywords(
             seed_clean,
             country,
             min(limit, 100),
+            login_id,
         )
         return out, debug
     except ImportError:
@@ -423,7 +428,7 @@ async def fetch_keywords_for_keywords(
         )
         if is_permission_denied:
             return [], {
-                "message": "Developer Token разрешён только для тестовых аккаунтов. Чтобы подтягивать ключи из боевого аккаунта Google Ads, подайте заявку на Basic или Standard доступ: Google Ads → Инструменты → API Center.",
+                "message": "Developer Token в режиме Test работает только с тестовыми аккаунтами. Укажите в Настройках поле «Manager account ID (MCC)» — ID вашего тестового MCC (например 185-780-6498). Customer ID — дочерний аккаунт под этим MCC.",
                 "api_error": err_str[:500],
             }
         return [], {
@@ -442,9 +447,12 @@ async def fetch_keywords_for_keywords(
         "developer-token": dev,
         "Content-Type": "application/json",
     }
-    # login-customer-id только для MCC: когда в настройках указан customer_id и он не совпадает с первым из list (т.е. это менеджер)
-    # Для обычного аккаунта не отправляем — иначе API может вернуть 400
-    if customer_id:
+    # login-customer-id: для тестового Developer Token обязателен MCC при запросе к дочернему аккаунту
+    if manager_customer_id:
+        mcc = _normalize_customer_id(manager_customer_id)
+        if mcc:
+            headers["login-customer-id"] = mcc
+    elif customer_id:
         normalized_input = _normalize_customer_id(customer_id)
         if normalized_input and normalized_input != use_customer_id:
             headers["login-customer-id"] = normalized_input
