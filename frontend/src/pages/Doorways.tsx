@@ -134,6 +134,15 @@ export default function Doorways() {
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка массового деплоя"),
   });
+  const batchDeleteMut = useMutation({
+    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-delete", { doorway_ids }).then((r) => r.data),
+    onSuccess: (data: { deleted?: number }) => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      setSelectedDoorwayIds(new Set());
+      toast.success(`Удалено дорвеев: ${data.deleted ?? 0}`);
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка удаления"),
+  });
   const batchMut = useMutation({
     mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean }) =>
       api.post("/doorways/generate-batch", payload, { timeout: 600000 }).then((r) => r.data),
@@ -548,6 +557,8 @@ export default function Doorways() {
             const deployable = (paginated as Doorway[]).filter((d) => d.status !== "deployed" && d.status !== "indexed");
             const selectedCount = selectedDoorwayIds.size;
             const allDeployableSelected = deployable.length > 0 && deployable.every((d) => selectedDoorwayIds.has(d.id));
+            const allInListSelected = paginated.length > 0 && (paginated as Doorway[]).every((d) => selectedDoorwayIds.has(d.id));
+            const selectedDeployable = (paginated as Doorway[]).filter((d) => selectedDoorwayIds.has(d.id) && d.status !== "deployed" && d.status !== "indexed");
             return (
               <>
                 <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-slate-700 bg-slate-800/50">
@@ -563,13 +574,34 @@ export default function Doorways() {
                     />
                     Выбрать все для деплоя ({deployable.length})
                   </label>
-                  {selectedCount > 0 && (
+                  <label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={allInListSelected}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedDoorwayIds(new Set((paginated as Doorway[]).map((d) => d.id)));
+                        else setSelectedDoorwayIds(new Set());
+                      }}
+                      className="rounded border-slate-600 text-amber-500"
+                    />
+                    Выбрать все в списке ({paginated.length})
+                  </label>
+                  {selectedCount > 0 && selectedDeployable.length > 0 && (
                     <button
-                      onClick={() => batchDeployMut.mutate(Array.from(selectedDoorwayIds))}
+                      onClick={() => batchDeployMut.mutate(selectedDeployable.map((d) => d.id))}
                       disabled={batchDeployMut.isPending}
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm"
                     >
-                      {batchDeployMut.isPending ? "Отправка…" : `Деплой выбранных (${selectedCount})`}
+                      {batchDeployMut.isPending ? "Отправка…" : `Деплой выбранных (${selectedDeployable.length})`}
+                    </button>
+                  )}
+                  {selectedCount > 0 && (
+                    <button
+                      onClick={() => window.confirm(`Удалить выбранные дорвеи (${selectedCount})?`) && batchDeleteMut.mutate(Array.from(selectedDoorwayIds))}
+                      disabled={batchDeleteMut.isPending}
+                      className="px-4 py-2 bg-red-600/80 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg text-sm"
+                    >
+                      {batchDeleteMut.isPending ? "Удаление…" : `Удалить выбранные (${selectedCount})`}
                     </button>
                   )}
                 </div>
@@ -602,17 +634,15 @@ export default function Doorways() {
                       style={{ animationDelay: `${Math.min(idx * 40, 200)}ms` }}
                     >
                       <td className="px-2 py-3">
-                        {canDeploy && (
-                          <input
-                            type="checkbox"
-                            checked={selectedDoorwayIds.has(d.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) setSelectedDoorwayIds((s) => new Set([...s, d.id]));
-                              else setSelectedDoorwayIds((s) => { const n = new Set(s); n.delete(d.id); return n; });
-                            }}
-                            className="rounded border-slate-600 text-emerald-600"
-                          />
-                        )}
+                        <input
+                          type="checkbox"
+                          checked={selectedDoorwayIds.has(d.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedDoorwayIds((s) => new Set([...s, d.id]));
+                            else setSelectedDoorwayIds((s) => { const n = new Set(s); n.delete(d.id); return n; });
+                          }}
+                          className="rounded border-slate-600 text-emerald-600"
+                        />
                       </td>
                       <td className="px-4 py-3 text-white font-mono text-sm">{d.id}</td>
                       <td className="px-4 py-3 text-slate-400">{campaignName(d.campaign_id)}</td>

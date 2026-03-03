@@ -399,3 +399,27 @@ async def delete_doorway(
     await db.delete(doorway)
     await db.commit()
     return None
+
+
+class BatchDeleteRequest(BaseModel):
+    doorway_ids: List[int]
+
+
+@router.post("/batch-delete")
+async def batch_delete_doorways(
+    data: BatchDeleteRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    if not data.doorway_ids:
+        return {"deleted": 0, "message": "Нет выбранных дорвеев"}
+    result = await db.execute(
+        select(Doorway)
+        .join(Campaign)
+        .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
+    )
+    doorways = result.scalars().all()
+    for dw in doorways:
+        await db.delete(dw)
+    await db.commit()
+    return {"deleted": len(doorways), "message": f"Удалено дорвеев: {len(doorways)}"}
