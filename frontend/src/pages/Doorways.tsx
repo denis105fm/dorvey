@@ -723,7 +723,7 @@ export default function Doorways() {
                             >
                               Предпросмотр
                             </DropdownMenuItem>
-                            {d.status !== "deployed" && d.status !== "indexed" && (
+                            {canDeploy && (
                               <DropdownMenuItem onClick={() => setDeployDoorwayId(d.id)}>Деплой</DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => setRecsDoorwayId(recsDoorwayId === d.id ? null : d.id)}>Рекомендации</DropdownMenuItem>

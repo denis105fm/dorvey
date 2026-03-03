@@ -334,6 +334,7 @@ export default function Campaigns() {
                       exit_cta: presets.exit_intent?.cta ?? "",
                       cta_desktop: presets.cta_by_device?.desktop ?? "",
                       cta_mobile: presets.cta_by_device?.mobile ?? "",
+                      show_offers_table: convForm.show_offers_table,
                     });
                   }}
                   disabled={!presets}
