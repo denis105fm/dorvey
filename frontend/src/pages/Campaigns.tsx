@@ -467,6 +467,7 @@ export default function Campaigns() {
               </h2>
               {rulesLoading ? <p className="text-slate-400">Загрузка...</p> : rules && (() => {
                 const r = (rulesForm ?? rules) as Record<string, unknown>;
+                const num = (key: string, def: number) => (typeof r[key] === "number" ? r[key] : def) as number;
                 const setR = (patch: Record<string, unknown>) => {
                   setRulesForm(prev => ({ ...(prev ?? rules), ...patch }));
                   updateRulesMut.mutate(patch);
@@ -501,11 +502,11 @@ export default function Campaigns() {
                       Cloaking (бот / человек)
                     </label>
                   </div>
-                  {r.cloaking_enabled && (
+                  {!!r.cloaking_enabled && (
                     <div>
                       <label className="block text-slate-400 text-sm mb-1">User-Agent для ботов (через запятую, для Nginx)</label>
                       <input
-                        value={Array.isArray(r.cloaking_bot_patterns) ? (r.cloaking_bot_patterns as string[]).join(", ") : (r.cloaking_bot_patterns ?? "Googlebot, YandexBot, bingbot").toString()}
+                        value={Array.isArray(r.cloaking_bot_patterns) ? (r.cloaking_bot_patterns as string[]).join(", ") : String(r.cloaking_bot_patterns ?? "Googlebot, YandexBot, bingbot")}
                         onChange={(e) => setR({ cloaking_bot_patterns: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
                         placeholder="Googlebot, YandexBot, bingbot"
                         className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm"
@@ -514,7 +515,7 @@ export default function Campaigns() {
                   )}
                   <div>
                     <label className="block text-slate-400 text-sm mb-1">Порог отката (% падения CR)</label>
-                    <input type="number" value={r.rollback_threshold_percent ?? 15} onChange={(e) => setR({ rollback_threshold_percent: parseFloat(e.target.value) || 15 })}
+                    <input type="number" value={num("rollback_threshold_percent", 15)} onChange={(e) => setR({ rollback_threshold_percent: parseFloat(e.target.value) || 15 })}
                       className="w-32 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                   </div>
                   {(r.preferred_layout_index !== undefined && r.preferred_layout_index !== null) && (
@@ -534,19 +535,19 @@ export default function Campaigns() {
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Порог CR (%) — применять если ниже</label>
-                          <input type="number" step={0.1} value={r.auto_apply_cr_threshold_percent ?? 1.5} onChange={(e) => setR({ auto_apply_cr_threshold_percent: parseFloat(e.target.value) || 1.5 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" step={0.1} value={num("auto_apply_cr_threshold_percent", 1.5)} onChange={(e) => setR({ auto_apply_cr_threshold_percent: parseFloat(e.target.value) || 1.5 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Порог CTR (%) — применять если ниже</label>
-                          <input type="number" step={0.1} value={r.auto_apply_ctr_threshold_percent ?? 2} onChange={(e) => setR({ auto_apply_ctr_threshold_percent: parseFloat(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" step={0.1} value={num("auto_apply_ctr_threshold_percent", 2)} onChange={(e) => setR({ auto_apply_ctr_threshold_percent: parseFloat(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Мин. кликов за период</label>
-                          <input type="number" value={r.auto_apply_min_clicks ?? 30} onChange={(e) => setR({ auto_apply_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" value={num("auto_apply_min_clicks", 30)} onChange={(e) => setR({ auto_apply_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Мин. показов</label>
-                          <input type="number" value={r.auto_apply_min_impressions ?? 100} onChange={(e) => setR({ auto_apply_min_impressions: parseInt(e.target.value) || 100 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" value={num("auto_apply_min_impressions", 100)} onChange={(e) => setR({ auto_apply_min_impressions: parseInt(e.target.value) || 100 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                       </div>
                     )}
@@ -562,11 +563,11 @@ export default function Campaigns() {
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Период (дней) — дорвеи задеплоены за</label>
-                          <input type="number" min={1} max={7} value={r.early_pause_min_days ?? 2} onChange={(e) => setR({ early_pause_min_days: parseInt(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" min={1} max={7} value={num("early_pause_min_days", 2)} onChange={(e) => setR({ early_pause_min_days: parseInt(e.target.value) || 2 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                         <div>
                           <label className="block text-slate-400 text-xs mb-1">Мин. кликов — паузить если 0 конверсий при ≥</label>
-                          <input type="number" min={10} max={200} value={r.early_pause_min_clicks ?? 30} onChange={(e) => setR({ early_pause_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
+                          <input type="number" min={10} max={200} value={num("early_pause_min_clicks", 30)} onChange={(e) => setR({ early_pause_min_clicks: parseInt(e.target.value) || 30 })} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                         </div>
                       </div>
                     )}
