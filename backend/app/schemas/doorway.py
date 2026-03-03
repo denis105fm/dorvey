@@ -42,6 +42,7 @@ class DoorwayBatchItem(BaseModel):
 
 class DoorwayBatchGenerateRequest(BaseModel):
     items: list[DoorwayBatchItem]
+    generate_faq: bool = False  # Generate 3-5 Q&A for FAQ block (same as single generation)
 
 
 class DoorwayBatchGenerateResponse(BaseModel):

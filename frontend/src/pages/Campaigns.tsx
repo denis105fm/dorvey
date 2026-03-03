@@ -54,6 +54,7 @@ export default function Campaigns() {
     exit_cta: "",
     cta_desktop: "",
     cta_mobile: "",
+    show_offers_table: false,
   });
 
   const { data: campaigns, isLoading } = useQuery({
@@ -162,6 +163,7 @@ export default function Campaigns() {
       exit_cta: ei?.cta_text ?? ei?.cta ?? "",
       cta_desktop: cta?.desktop ?? "",
       cta_mobile: cta?.mobile ?? "",
+      show_offers_table: conversion.show_offers_table === true,
     });
   }, [conversion]);
 
@@ -382,6 +384,10 @@ export default function Campaigns() {
                       <input value={convForm.cta_mobile} onChange={(e) => setConvForm((f) => ({ ...f, cta_mobile: e.target.value }))} placeholder="Оформить заявку" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
                     </div>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="show_offers_table" checked={convForm.show_offers_table} onChange={(e) => setConvForm((f) => ({ ...f, show_offers_table: e.target.checked }))} className="rounded border-slate-600 bg-slate-700 text-emerald-500" />
+                    <label htmlFor="show_offers_table" className="text-slate-300 text-sm">Показывать таблицу офферов на дорвеях (Название / Ставка / Сумма / Срок). Снимите для формата «рассказ + одна кнопка».</label>
+                  </div>
                   <button onClick={() => {
                     const payload: Record<string, unknown> = {};
                     if (convForm.urgency_text.trim()) payload.urgency_block = { text: convForm.urgency_text.trim() };
@@ -393,6 +399,7 @@ export default function Campaigns() {
                     else payload.exit_intent = null;
                     if (convForm.cta_desktop.trim() || convForm.cta_mobile.trim()) payload.cta_by_device = { desktop: convForm.cta_desktop.trim() || undefined, mobile: convForm.cta_mobile.trim() || undefined };
                     else payload.cta_by_device = null;
+                    payload.show_offers_table = convForm.show_offers_table;
                     updateConversionMut.mutate(payload);
                   }} disabled={updateConversionMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white text-sm">
                     {updateConversionMut.isPending ? "Сохранение…" : "Сохранить конверсию"}

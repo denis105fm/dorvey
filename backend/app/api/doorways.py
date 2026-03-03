@@ -143,12 +143,16 @@ async def generate_batch(
                 domain_id=item.domain_id,
                 keyword=item.keyword,
                 path=item.path,
+                generate_faq=data.generate_faq,
             )
         except (ValueError, Exception) as e:
             results.append({"keyword": item.keyword, "status": "error", "error": str(e)[:200]})
             continue
         doorway_id = None
         try:
+            cloaking = {}
+            if gen_result.get("faq_qa"):
+                cloaking["faq_qa"] = gen_result["faq_qa"]
             camp = (await db.execute(select(Campaign).where(Campaign.id == item.campaign_id))).scalar_one_or_none()
             preferred_layout = None
             if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
@@ -161,6 +165,7 @@ async def generate_batch(
                 content=gen_result.get("content"),
                 meta_description=gen_result.get("meta_description"),
                 status="draft",
+                cloaking_rules=cloaking if cloaking else None,
                 layout_index=preferred_layout if preferred_layout is not None else None,
             )
             db.add(dw)

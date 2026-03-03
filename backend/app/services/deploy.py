@@ -649,10 +649,11 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
             social_proof_block = "".join(parts_sp)
 
     comparison_table = None
+    camp_show_table = camp_settings.get("show_offers_table", False)
     offers_for_table = [o for o in offers if o.get("name") or o.get("rate") or o.get("amount") or o.get("term")]
     if not offers_for_table and offers:
         offers_for_table = [dict(o, name=o.get("name") or f"Вариант {i+1}") for i, o in enumerate(offers[:5])]
-    if offers_for_table:
+    if camp_show_table and offers_for_table:
         rows = []
         for o in offers_for_table[:5]:
             url_with_sub = _append_sub_id(o["url"], dw.id, o.get("id"))

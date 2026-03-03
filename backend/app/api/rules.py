@@ -18,6 +18,7 @@ class ConversionSettings(BaseModel):
     social_proof: Optional[dict[str, Any] | str] = None
     exit_intent: Optional[dict[str, Any]] = None
     cta_by_device: Optional[dict[str, str]] = None
+    show_offers_table: Optional[bool] = None  # If False, doorway shows content + single CTA only (no comparison table)
 
 
 class RulesBuilder(BaseModel):
@@ -173,6 +174,7 @@ async def get_conversion(campaign_id: int, current_user: CurrentUser, db: AsyncS
         "social_proof": settings.get("social_proof"),
         "exit_intent": settings.get("exit_intent"),
         "cta_by_device": settings.get("cta_by_device"),
+        "show_offers_table": settings.get("show_offers_table", False),
     }
 
 
@@ -193,6 +195,8 @@ async def update_conversion(campaign_id: int, data: ConversionSettings, current_
         settings["exit_intent"] = data.exit_intent
     if data.cta_by_device is not None:
         settings["cta_by_device"] = data.cta_by_device
+    if data.show_offers_table is not None:
+        settings["show_offers_table"] = data.show_offers_table
     rules["settings"] = settings
     c.affiliate_rules = rules
     await db.commit()

@@ -135,8 +135,8 @@ export default function Doorways() {
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка массового деплоя"),
   });
   const batchMut = useMutation({
-    mutationFn: (items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]) =>
-      api.post("/doorways/generate-batch", { items }, { timeout: 600000 }).then((r) => r.data),
+    mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean }) =>
+      api.post("/doorways/generate-batch", payload, { timeout: 600000 }).then((r) => r.data),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["doorways"] });
       const errors = (data.results || []).filter((r: { status?: string }) => r.status === "error");
@@ -286,7 +286,7 @@ export default function Doorways() {
       keyword,
       path: gen.path === "/" ? `/${slug(keyword)}` : gen.path,
     }));
-    batchMut.mutate(items);
+    batchMut.mutate({ items, generate_faq: gen.generate_faq });
   };
 
   return (
@@ -434,7 +434,7 @@ export default function Doorways() {
                   <p className="mt-1 text-amber-400 text-sm">Первая ошибка: {(batchMut.data.results as Array<{ status?: string; error?: string }>).find((r) => r.status === "error")?.error}</p>
                 )}
               </div>
-              <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки).</p>
+              <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки). Галочка «Сгенерировать FAQ» действует и для одиночной, и для пакетной генерации.</p>
               <div className="flex items-center gap-4 flex-wrap">
                 <label className="flex items-center gap-2 text-slate-300">
                   <input type="checkbox" checked={gen.save} onChange={(e) => setGen((g) => ({ ...g, save: e.target.checked }))} className="rounded" />
