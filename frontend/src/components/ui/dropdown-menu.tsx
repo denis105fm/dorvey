@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../../lib/utils";
 
 interface DropdownMenuProps {
@@ -9,11 +10,14 @@ interface DropdownMenuProps {
 
 export function DropdownMenu({ trigger, children, align = "right" }: DropdownMenuProps) {
   const [open, setOpen] = React.useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
     if (open) {
       document.addEventListener("click", handleClick);
@@ -21,20 +25,37 @@ export function DropdownMenu({ trigger, children, align = "right" }: DropdownMen
     }
   }, [open]);
 
+  const position = React.useMemo(() => {
+    if (!open || !triggerRef.current) return null;
+    const rect = triggerRef.current.getBoundingClientRect();
+    return {
+      top: rect.bottom + 4,
+      left: align === "right" ? rect.right : rect.left,
+      transform: align === "right" ? "translateX(-100%)" : "none",
+    };
+  }, [open, align]);
+
   return (
-    <div className="relative inline-block" ref={ref}>
+    <div className="relative inline-block" ref={triggerRef}>
       <div onClick={() => setOpen((o) => !o)}>{trigger}</div>
-      {open && (
-        <div
-          className={cn(
-            "absolute z-50 mt-1 min-w-[160px] rounded-lg border border-slate-600 bg-slate-800 py-1 shadow-lg",
-            align === "right" ? "right-0" : "left-0"
-          )}
-          onClick={() => setOpen(false)}
-        >
-          {children}
-        </div>
-      )}
+      {open && position && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className={cn(
+              "fixed z-[100] mt-1 min-w-[160px] rounded-lg border border-slate-600 bg-slate-800 py-1 shadow-xl"
+            )}
+            style={{
+              top: position.top,
+              left: position.left,
+              transform: position.transform,
+            }}
+            onClick={() => setOpen(false)}
+          >
+            {children}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
