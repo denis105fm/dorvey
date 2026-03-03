@@ -43,6 +43,7 @@ export default function Campaigns() {
   const [cloakingSourceId, setCloakingSourceId] = useState<number>(0);
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [edit, setEdit] = useState<Campaign | null>(null);
+  const [showActionsHelp, setShowActionsHelp] = useState(false);
   const [form, setForm] = useState({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" });
   const [convForm, setConvForm] = useState({
     urgency_text: "",
@@ -182,11 +183,32 @@ export default function Campaigns() {
           Добавить кампанию
         </button>
       </div>
+      <p className="text-slate-400 text-sm mb-4">
+        <strong className="text-slate-300">Таблица офферов</strong> — включается в действии <strong className="text-amber-400">Конверсия</strong> (чекбокс «Показывать таблицу офферов»). <strong className="text-slate-300">FAQ</strong> (блок вопросов-ответов) — в <strong className="text-emerald-400">Дорвеи → шаг 3 «Ключевые слова»</strong>, галочка «Сгенерировать FAQ».
+      </p>
       {isLoading ? (
         <p className="text-slate-400">Загрузка...</p>
       ) : (
         <div className="space-y-6">
           <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden">
+            <div className="px-4 py-2 border-b border-slate-700 flex items-center justify-between">
+              <span className="text-slate-400 text-sm">Список кампаний</span>
+              <button type="button" onClick={() => setShowActionsHelp((v) => !v)} className="text-slate-500 hover:text-slate-300 text-sm">
+                {showActionsHelp ? "Скрыть справку по действиям" : "Что делают действия?"}
+              </button>
+            </div>
+            {showActionsHelp && (
+              <div className="px-4 py-3 bg-slate-800/50 border-b border-slate-700 text-slate-400 text-sm space-y-1.5">
+                <p><strong className="text-amber-400">A/B</strong> — кто победитель по CR за 14 дней; копирование контента победителя в другой дорвей (Copy winner).</p>
+                <p><strong className="text-blue-400">Traffic mix</strong> — распределение трафика по вариантам/офферам (JSON).</p>
+                <p><strong className="text-cyan-400">Copy winner</strong> — скопировать контент (title, meta, текст) с победителя A/B в выбранный дорвей.</p>
+                <p><strong className="text-orange-400">Копировать настройки</strong> — скопировать cloaking-настройки (urgency, отзывы, exit-intent, FAQ, CTA) с лучшего по CR дорвея на другой.</p>
+                <p><strong className="text-violet-400">Правила</strong> — запрещённые слова, GEO, disclaimer, автосмена/откат оффера по CR, cloaking (бот/человек), авто-применение рекомендаций AI, ранний стоп.</p>
+                <p><strong className="text-amber-400">Конверсия</strong> — тексты для дорвеев: urgency, social proof, отзывы, exit-intent попап, CTA по устройству, <strong className="text-slate-300">вкл/выкл таблицы офферов</strong>.</p>
+                <p><strong className="text-emerald-400">Изменить</strong> — название, affiliate_url, язык, регион, валюта, статус кампании.</p>
+                <p><strong className="text-red-400">Удалить</strong> — удалить кампанию.</p>
+              </div>
+            )}
             {campaigns?.length ? (
               <table className="w-full">
                 <thead>
