@@ -519,6 +519,47 @@ async def google_ads_oauth_callback(
     return HTMLResponse(html)
 
 
+class CreateGoogleAdsTestAccountRequest(BaseModel):
+    """ID тестового менеджера (MCC). Если не указан — используется Customer ID из настроек."""
+    manager_customer_id: Optional[str] = None
+
+
+@router.post("/google-ads-create-test-account")
+async def google_ads_create_test_account(
+    data: CreateGoogleAdsTestAccountRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Создать тестовый клиентский аккаунт под тестовым MCC через API (CustomerService.createCustomerClient).
+    Требуется: Developer Token в режиме Test, OAuth и ID тестового менеджера.
+    Если manager_customer_id не передан — используется Customer ID из настроек как MCC.
+    Документация: https://developers.google.com/google-ads/api/docs/best-practices/test-accounts
+    """
+    from app.services.settings_helpers import get_user_google_ads_credentials
+    from app.services.google_ads_keywords_service import create_google_ads_test_client
+
+    creds = await get_user_google_ads_credentials(db, current_user.id)
+    if not creds:
+        raise HTTPException(400, "Заполните Developer Token и OAuth в блоке Google Ads и сохраните настройки.")
+
+    manager_id = (data.manager_customer_id or "").strip() or (creds.get("customer_id") or "").strip()
+    if not manager_id:
+        raise HTTPException(
+            400,
+            "Укажите ID тестового менеджера (MCC) в поле «Customer ID» и сохраните настройки, "
+            "либо передайте manager_customer_id в теле запроса. "
+            "Тестовый менеджер создаётся по ссылке: https://ads.google.com/nav/selectaccount?sf=mt",
+        )
+
+    new_customer_id, err = await create_google_ads_test_client(creds, manager_id)
+    if err:
+        raise HTTPException(400, err)
+    # Формат с дефисами для подстановки в поле Customer ID
+    formatted = f"{new_customer_id[:3]}-{new_customer_id[3:6]}-{new_customer_id[6:]}" if len(new_customer_id) >= 10 else new_customer_id
+    return {"customer_id": new_customer_id, "customer_id_formatted": formatted}
+
+
 GSC_SCOPE = "https://www.googleapis.com/auth/indexing"
 
 

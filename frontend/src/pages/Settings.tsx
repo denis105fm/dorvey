@@ -90,6 +90,7 @@ export default function Settings() {
   const [hotjarTestMessage, setHotjarTestMessage] = useState("");
   const [googleAdsTestStatus, setGoogleAdsTestStatus] = useState<null | "checking" | "ok" | "error">(null);
   const [googleAdsTestMessage, setGoogleAdsTestMessage] = useState("");
+  const [googleAdsCreateTestLoading, setGoogleAdsCreateTestLoading] = useState(false);
   const [showGoogleAdsDevToken, setShowGoogleAdsDevToken] = useState(false);
   const [showGoogleAdsSecret, setShowGoogleAdsSecret] = useState(false);
   const [showGoogleAdsRefresh, setShowGoogleAdsRefresh] = useState(false);
@@ -714,6 +715,34 @@ export default function Settings() {
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
                   <p className="text-slate-500 text-xs mt-1">Для подсказок ключей используется этот рекламный аккаунт. Если пусто — берётся первый доступный.</p>
+                  <p className="text-slate-500 text-xs mt-1">
+                    Тестовый менеджер (MCC) создаётся по ссылке:{" "}
+                    <a href="https://ads.google.com/nav/selectaccount?sf=mt" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Создать тестовый MCC</a>.
+                    Под ним можно создать тестовый аккаунт программно:
+                  </p>
+                  <button
+                    type="button"
+                    disabled={googleAdsCreateTestLoading || saveIntegrationsMut.isPending}
+                    onClick={async () => {
+                      setGoogleAdsCreateTestLoading(true);
+                      try {
+                        const { data } = await api.post<{ customer_id: string; customer_id_formatted: string }>(
+                          "/settings/google-ads-create-test-account",
+                          { manager_customer_id: (integrations.google_ads_customer_id ?? "").trim() || undefined }
+                        );
+                        setIntegrations((p) => ({ ...p, google_ads_customer_id: data.customer_id_formatted }));
+                        toast.success(`Создан тестовый аккаунт: ${data.customer_id_formatted}. Подставлен в Customer ID.`);
+                      } catch (e: unknown) {
+                        const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Ошибка создания тестового аккаунта";
+                        toast.error(typeof msg === "string" ? msg : "Ошибка создания тестового аккаунта");
+                      } finally {
+                        setGoogleAdsCreateTestLoading(false);
+                      }
+                    }}
+                    className="mt-2 px-3 py-1.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 rounded-lg text-white text-sm"
+                  >
+                    {googleAdsCreateTestLoading ? "Создание…" : "Создать тестовый аккаунт (через API)"}
+                  </button>
                 </div>
                 <div className="md:col-span-2 flex items-center gap-3 flex-wrap">
                   <button

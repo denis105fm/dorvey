@@ -90,6 +90,101 @@ def _normalize_customer_id(customer_id: str) -> str:
     return (customer_id or "").replace("-", "").strip()
 
 
+def _create_test_client_sync(
+    developer_token: str,
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    manager_customer_id: str,
+) -> tuple[str | None, str]:
+    """
+    Создаёт тестовый клиентский аккаунт под указанным тестовым MCC через CustomerService.createCustomerClient.
+    manager_customer_id — ID тестового менеджера (MCC), без дефисов.
+    Возвращает (customer_id нового аккаунта без префикса, или None, error_message).
+    Документация: https://developers.google.com/google-ads/api/docs/account-management/create-account
+    """
+    from datetime import datetime
+
+    try:
+        from google.ads.googleads.client import GoogleAdsClient
+        from google.ads.googleads.errors import GoogleAdsException
+    except ImportError:
+        return None, "Установите библиотеку google-ads: pip install google-ads"
+
+    manager_id = _normalize_customer_id(manager_customer_id)
+    if not manager_id:
+        return None, "Укажите ID тестового менеджера (MCC)."
+
+    config: dict[str, Any] = {
+        "developer_token": developer_token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "use_proto_plus": True,
+        "login_customer_id": manager_id,
+    }
+    try:
+        client = GoogleAdsClient.load_from_dict(config)
+    except Exception as e:
+        return None, f"Ошибка инициализации клиента: {str(e)[:200]}"
+
+    customer_service = client.get_service("CustomerService")
+    customer = client.get_type("Customer")
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    customer.descriptive_name = f"Test account (Dorvey) {now}"
+    customer.currency_code = "USD"
+    customer.time_zone = "America/New_York"
+
+    try:
+        response = customer_service.create_customer_client(
+            customer_id=manager_id,
+            customer_client=customer,
+        )
+    except GoogleAdsException as ex:
+        err_msg = str(ex)
+        if hasattr(ex, "failure") and ex.failure and hasattr(ex.failure, "errors"):
+            parts = [err_msg]
+            for err in ex.failure.errors:
+                parts.append(getattr(err, "message", str(err)) or "")
+            err_msg = " ".join(parts)[:400]
+        return None, err_msg or "Ошибка Google Ads API"
+    except Exception as e:
+        return None, str(e)[:300]
+
+    resource_name = getattr(response, "resource_name", None) or ""
+    if resource_name.startswith("customers/"):
+        new_customer_id = resource_name.replace("customers/", "").strip()
+        return new_customer_id, ""
+    return None, "Не удалось получить ID созданного аккаунта."
+
+
+async def create_google_ads_test_client(
+    creds: dict,
+    manager_customer_id: str,
+) -> tuple[str | None, str]:
+    """
+    Асинхронная обёртка: создаёт тестовый клиент под тестовым MCC.
+    creds: developer_token, client_id, client_secret, refresh_token.
+    Возвращает (customer_id нового аккаунта, error_message).
+    """
+    dev = (creds.get("developer_token") or "").strip()
+    cid = (creds.get("client_id") or "").strip()
+    secret = (creds.get("client_secret") or "").strip()
+    refresh = (creds.get("refresh_token") or "").strip()
+    if not dev or not cid or not secret or not refresh:
+        return None, "Заполните Developer Token и OAuth в настройках Google Ads."
+
+    new_id, err = await asyncio.to_thread(
+        _create_test_client_sync,
+        dev,
+        cid,
+        secret,
+        refresh,
+        manager_customer_id,
+    )
+    return new_id, err
+
+
 def _fetch_keywords_via_official_client(
     developer_token: str,
     client_id: str,
