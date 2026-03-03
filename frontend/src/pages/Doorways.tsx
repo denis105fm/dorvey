@@ -29,7 +29,7 @@ const STATUS_LABELS: Record<string, string> = {
   paused: "На паузе",
 };
 
-const PER_PAGE = 10;
+const PER_PAGE = 500;
 
 export default function Doorways() {
   const qc = useQueryClient();
@@ -99,10 +99,9 @@ export default function Doorways() {
     return list;
   }, [doorways, filterCampaign, filterDomain, filterProfit, searchQuery, metricsByDoorway]);
 
-  const totalPages = Math.ceil(filtered.length / PER_PAGE) || 1;
   const paginated = useMemo(
-    () => filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE),
-    [filtered, page]
+    () => filtered.slice(0, PER_PAGE),
+    [filtered]
   );
 
   const generateMut = useMutation({
@@ -535,7 +534,7 @@ export default function Doorways() {
         />
       ) : (
         <div className="card-volumetric overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-280px)]">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-700">
@@ -653,21 +652,9 @@ export default function Doorways() {
               </tbody>
             </table>
           </div>
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-slate-700">
-              <span className="text-slate-500 text-sm">
-                {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, filtered.length)} из {filtered.length}
-              </span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-                  <ChevronLeft size={16} />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
-                  <ChevronRight size={16} />
-                </Button>
-              </div>
-            </div>
-          )}
+          <div className="flex items-center justify-between px-4 py-2 border-t border-slate-700 text-slate-500 text-sm">
+            <span>Всего: {filtered.length}</span>
+          </div>
         </div>
       )}
 
