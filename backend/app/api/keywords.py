@@ -128,7 +128,7 @@ async def suggest_keywords_from_external(
             limit=data.limit,
         )
     elif provider == "google_ads":
-        keywords, _ = await google_ads_fetch(
+        keywords, debug = await google_ads_fetch(
             c["developer_token"], c["client_id"], c["client_secret"], c["refresh_token"],
             seed=data.seed,
             country=data.country,
@@ -136,6 +136,8 @@ async def suggest_keywords_from_external(
             customer_id=c.get("customer_id"),
             manager_customer_id=c.get("manager_customer_id"),
         )
+        hint = (debug or {}).get("message") if not keywords and debug else None
+        return KeywordSuggestFromExternalResponse(keywords=keywords, source=provider, hint=hint)
     else:
         raise HTTPException(status_code=400, detail=f"Провайдер «{provider}» не поддерживается.")
     return KeywordSuggestFromExternalResponse(keywords=keywords, source=provider)

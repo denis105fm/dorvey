@@ -33,6 +33,10 @@ export default function Keywords() {
     mutationFn: (d: { campaign_id: number; seed: string; country: string; limit: number }) =>
       api.post("/keywords/suggest-from-external", d).then((r) => r.data),
     onSuccess: () => { setSelectedSuggest([]); },
+    onError: (e: { response?: { data?: { detail?: string } } }) => {
+      const msg = e?.response?.data?.detail ?? "Ошибка подсказки ключей";
+      toast.error(msg);
+    },
   });
 
   const suggestByOffersMut = useMutation({
@@ -224,6 +228,10 @@ export default function Keywords() {
           <p className="text-amber-400 text-sm">
             {((suggestMut.error || suggestByOffersMut.error) as { response?: { data?: { detail?: string } } })?.response?.data?.detail || "Ошибка. Выберите провайдера подсказки ключей в Настройках → Интеграции и укажите API данные."}
           </p>
+        ) : suggestMut.data && !suggestMut.data.keywords?.length && suggestMut.data.hint ? (
+          <p className="text-amber-400 text-sm mt-2">
+            {suggestMut.data.hint}
+          </p>
         ) : null}
       </div>
 
@@ -278,6 +286,9 @@ export default function Keywords() {
             {startupKwMut.isPending ? "…" : "Подтянуть и импортировать"}
           </button>
         </div>
+        {startupKwMut.data?.hint && (startupKwMut.data.keywords?.length ?? 0) === 0 ? (
+          <p className="text-amber-400 text-sm mt-2">{startupKwMut.data.hint}</p>
+        ) : null}
       </div>
 
       <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-800/50">
@@ -306,6 +317,9 @@ export default function Keywords() {
             {autoPullMut.isPending ? "Загрузка…" : "Подтянуть и импортировать"}
           </button>
         </div>
+        {autoPullMut.data?.hint && autoPullMut.data.imported === 0 ? (
+          <p className="text-amber-400 text-sm mt-2">{autoPullMut.data.hint}</p>
+        ) : null}
       </div>
       {isLoading ? (
         <p className="text-slate-400">Загрузка...</p>

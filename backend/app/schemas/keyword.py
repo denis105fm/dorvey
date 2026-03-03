@@ -42,6 +42,7 @@ class KeywordSuggestFromExternalRequest(BaseModel):
 class KeywordSuggestFromExternalResponse(BaseModel):
     keywords: list[KeywordSuggestItem]
     source: str = "dataforseo"
+    hint: Optional[str] = None  # сообщение об ошибке/подсказка, если ключей 0
 
 
 class KeywordBulkImportFromSuggest(BaseModel):
