@@ -271,6 +271,60 @@ async def delete_keyword(
 
 # --- Стартовый набор ниш и авто-подсказки ---
 
+@router.get("/suggested-seeds-for-campaign")
+async def get_suggested_seeds_for_campaign(
+    campaign_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Рекомендуемые seed-фразы для подсказки ключей по типу кампании (по названию)."""
+    ok = await _check_campaign(db, campaign_id, current_user.id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    r = await db.execute(select(Campaign.name).where(Campaign.id == campaign_id))
+    row = r.first()
+    campaign_name = row[0] if row else ""
+    from app.services.startup_niches import get_suggested_seeds_for_campaign_name
+    seeds, label, type_id = get_suggested_seeds_for_campaign_name(campaign_name or "")
+    return {"campaign_name": campaign_name, "seeds": seeds, "label": label, "type": type_id}
+
+
+@router.get("/campaign-keywords-csv/list")
+async def list_campaign_keywords_csv_types(current_user: CurrentUser):
+    """Список типов кампаний для скачивания CSV с ключами (English)."""
+    from app.services.startup_niches import CAMPAIGN_SEED_SUGGESTIONS
+    return [
+        {"id": r["id"], "label": r["label"]}
+        for r in CAMPAIGN_SEED_SUGGESTIONS
+        if r.get("id")
+    ]
+
+
+@router.get("/campaign-keywords-csv")
+async def download_campaign_keywords_csv(
+    type: str,
+    current_user: CurrentUser,
+):
+    """Скачать CSV с ключами для типа кампании (English). Параметр type: click_box, clicker, survey, social_video, survey_mix, casual."""
+    from fastapi.responses import PlainTextResponse
+    from app.services.startup_niches import CAMPAIGN_KEYWORDS_CSV
+
+    type_key = (type or "").strip().lower()
+    if type_key not in CAMPAIGN_KEYWORDS_CSV:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown type. Use one of: {', '.join(CAMPAIGN_KEYWORDS_CSV.keys())}",
+        )
+    keywords = CAMPAIGN_KEYWORDS_CSV[type_key]
+    csv_content = "\n".join(keywords)
+    filename = f"keywords_{type_key}.csv"
+    return PlainTextResponse(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/startup-niches")
 async def get_startup_niches(current_user: CurrentUser):
     """Справочник ниш для стартового набора ключей (seed-фразы для провайдера)."""

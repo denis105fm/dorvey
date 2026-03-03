@@ -408,6 +408,11 @@ async def fetch_keywords_for_keywords(
             # Короткая подсказка для типичных ошибок
             err_lower = err_msg.lower()
             details_str = " ".join(details).lower() if details else ""
+            if "explorer access" in err_lower or "explorer access" in details_str:
+                return [], {
+                    "message": "Подсказки ключей недоступны при уровне доступа Explorer. Для метода GenerateKeywordIdeas нужен Basic или Standard. Подайте заявку в Google Ads → Настройки → API Center.",
+                    "api_error": err_msg[:500],
+                }
             if "not yet enabled" in err_lower or "deactivated" in err_lower or "can't be accessed" in err_lower or "not yet enabled" in details_str or "deactivated" in details_str:
                 return [], {
                     "message": "Рекламный аккаунт недоступен: ещё не активирован или деактивирован. Проверьте Customer ID в настройках (должен быть активный тестовый клиентский аккаунт под вашим MCC).",
@@ -441,6 +446,11 @@ async def fetch_keywords_for_keywords(
         # Любая другая ошибка официального клиента — возвращаем как есть, REST не вызываем
         err_str = str(e)
         err_lower = err_str.lower()
+        if "explorer access" in err_lower:
+            return [], {
+                "message": "Подсказки ключей недоступны при уровне доступа Explorer. Для метода GenerateKeywordIdeas нужен Basic или Standard. Подайте заявку в Google Ads → Настройки → API Center.",
+                "api_error": err_str[:500],
+            }
         if "not yet enabled" in err_lower or "deactivated" in err_lower or "can't be accessed" in err_lower:
             return [], {
                 "message": "Рекламный аккаунт недоступен: ещё не активирован или деактивирован. Проверьте Customer ID в настройках (должен быть активный тестовый клиентский аккаунт под вашим MCC).",

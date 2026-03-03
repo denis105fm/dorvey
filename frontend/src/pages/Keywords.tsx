@@ -65,6 +65,12 @@ export default function Keywords() {
     queryFn: () => api.get("/keywords/startup-niches").then((r) => r.data),
   });
 
+  const { data: campaignSeeds } = useQuery({
+    queryKey: ["keywords", "suggested-seeds", campaignId],
+    queryFn: () => api.get("/keywords/suggested-seeds-for-campaign", { params: { campaign_id: campaignId } }).then((r) => r.data),
+    enabled: !!campaignId,
+  });
+
   const startupKwMut = useMutation({
     mutationFn: (d: { seeds: string[]; country: string; limit_per_seed: number; campaign_id?: number; auto_import: boolean }) =>
       api.post("/keywords/startup-keywords", d).then((r) => r.data),
@@ -143,6 +149,38 @@ export default function Keywords() {
           <button onClick={() => fileRef.current?.click()} disabled={bulkMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm">Импорт CSV</button>
         </div>
       </div>
+
+      {campaignSeeds?.seeds?.length ? (
+        <div className="mb-4 p-3 rounded-xl border border-slate-600 bg-slate-800/30">
+          <p className="text-slate-400 text-sm mb-2">
+            Рекомендуемые фразы для кампании{campaignSeeds.label ? ` (${campaignSeeds.label})` : ""}: {campaignSeeds.seeds.slice(0, 5).join(", ")}{campaignSeeds.seeds.length > 5 ? "…" : ""}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => startupKwMut.mutate({
+                seeds: campaignSeeds.seeds,
+                country: suggestCountry,
+                limit_per_seed: 25,
+                campaign_id: campaignId,
+                auto_import: true,
+              })}
+              disabled={startupKwMut.isPending}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-sm"
+            >
+              {startupKwMut.isPending ? "Загрузка…" : "Подтянуть по кампании и импортировать"}
+            </button>
+            {campaignSeeds.type ? (
+              <a
+                href={`/api/keywords/campaign-keywords-csv?type=${campaignSeeds.type}`}
+                download={`keywords_${campaignSeeds.type}.csv`}
+                className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm inline-block"
+              >
+                Скачать CSV для импорта
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mb-6 p-4 rounded-xl border border-slate-600 bg-slate-800/50">
         <h2 className="text-lg font-medium text-white mb-3">Подтянуть из внешних источников</h2>

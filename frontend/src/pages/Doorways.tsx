@@ -130,9 +130,15 @@ export default function Doorways() {
       api.post("/doorways/generate-batch", { items }).then((r) => r.data),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["doorways"] });
-      toast.success(`Создано ${data.created} дорвеев`);
+      const errors = (data.results || []).filter((r: { status?: string }) => r.status === "error");
+      if (data.created > 0) toast.success(`Создано дорвеев: ${data.created}`);
+      if (errors.length > 0 && data.created === 0) toast.error((errors[0] as { error?: string })?.error ?? "Ошибка по ключам");
+      else if (errors.length > 0) toast.warning(`Часть ключей с ошибками: ${(errors[0] as { error?: string })?.error}`);
     },
-    onError: () => toast.error("Ошибка пакетной генерации"),
+    onError: (e: { response?: { data?: { detail?: string } }; message?: string }) => {
+      const msg = e?.response?.data?.detail ?? e?.response?.data?.message ?? e?.message ?? "Ошибка пакетной генерации";
+      toast.error(typeof msg === "string" ? msg : "Ошибка пакетной генерации");
+    },
   });
   const rollbackMut = useMutation({
     mutationFn: (id: number) => api.post(`/optimizer/doorway/${id}/rollback`).then((r) => r.data),
@@ -414,7 +420,11 @@ export default function Doorways() {
                   {batchMut.isPending ? "Генерация..." : "Сгенерировать пакет"}
                 </Button>
                 {batchMut.data && <p className="mt-2 text-slate-400 text-sm">Создано: {batchMut.data.created}</p>}
+                {batchMut.data?.results?.some((r: { status?: string }) => r.status === "error") && (
+                  <p className="mt-1 text-amber-400 text-sm">Первая ошибка: {(batchMut.data.results as { error?: string }[]).find((r: { status?: string }) => r.status === "error")?.error}</p>
+                )}
               </div>
+              <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки).</p>
               <div className="flex items-center gap-4 flex-wrap">
                 <label className="flex items-center gap-2 text-slate-300">
                   <input type="checkbox" checked={gen.save} onChange={(e) => setGen((g) => ({ ...g, save: e.target.checked }))} className="rounded" />

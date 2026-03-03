@@ -127,6 +127,8 @@ async def generate_batch(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    if not (data.items and len(data.items) > 0):
+        raise HTTPException(status_code=400, detail="Добавьте ключи в поле пакетной генерации (по одному на строку).")
     results = []
     created = 0
     for item in data.items[:50]:  # limit 50 per request
@@ -142,8 +144,8 @@ async def generate_batch(
                 keyword=item.keyword,
                 path=item.path,
             )
-        except ValueError as e:
-            results.append({"keyword": item.keyword, "status": "error", "error": str(e)})
+        except (ValueError, Exception) as e:
+            results.append({"keyword": item.keyword, "status": "error", "error": str(e)[:200]})
             continue
         doorway_id = None
         try:
