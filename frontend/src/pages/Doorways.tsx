@@ -809,7 +809,24 @@ export default function Doorways() {
                                     const w = window.open("", "_blank");
                                     if (w) { w.document.write(res.data as string); w.document.close(); }
                                   })
-                                  .catch(() => toast.error("Не удалось загрузить предпросмотр"));
+                                  .catch((err: { response?: { data?: unknown; status?: number } }) => {
+                                    let msg = "Не удалось загрузить предпросмотр";
+                                    const d = err?.response?.data;
+                                    if (err?.response?.status === 500 && d != null) {
+                                      if (typeof d === "string") {
+                                        try {
+                                          const o = JSON.parse(d);
+                                          if (typeof o?.detail === "string") msg = o.detail;
+                                          else if (d.length < 200) msg = d;
+                                        } catch {
+                                          if (d.length < 200) msg = d;
+                                        }
+                                      } else if (typeof (d as { detail?: string })?.detail === "string") {
+                                        msg = (d as { detail: string }).detail;
+                                      }
+                                    }
+                                    toast.error(msg);
+                                  });
                               }}
                             >
                               Предпросмотр

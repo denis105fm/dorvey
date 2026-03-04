@@ -57,17 +57,24 @@ async def preview_doorway(
     db: AsyncSession = Depends(get_db),
 ):
     """Вернуть HTML дорвея для предпросмотра (без деплоя)."""
-    r = await db.execute(
-        select(Doorway, Campaign)
-        .join(Campaign, Doorway.campaign_id == Campaign.id)
-        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
-    )
-    if not r.first():
-        raise HTTPException(status_code=404, detail="Doorway not found")
-    html = await prepare_doorway_html(db, doorway_id, for_bot=False)
-    if not html:
-        raise HTTPException(status_code=500, detail="Could not prepare HTML")
-    return HTMLResponse(content=html)
+    try:
+        r = await db.execute(
+            select(Doorway, Campaign)
+            .join(Campaign, Doorway.campaign_id == Campaign.id)
+            .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+        )
+        if not r.first():
+            raise HTTPException(status_code=404, detail="Doorway not found")
+        html = await prepare_doorway_html(db, doorway_id, for_bot=False)
+        if not html:
+            raise HTTPException(status_code=500, detail="Could not prepare HTML")
+        return HTMLResponse(content=html)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/doorway/{doorway_id}")
