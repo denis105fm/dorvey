@@ -281,19 +281,64 @@ def deploy_sw_push(server: Server, base_path: str = "/var/www/html") -> tuple[bo
 
 def run_certbot_ssl(server: Server, domain: str, webroot: str = "/var/www/html") -> tuple[bool, str]:
     """Run certbot for domain via SSH. Returns (success, message)."""
+    # Оставляем только hostname (без протокола и пути)
+    domain_clean = (domain or "").strip().lower()
+    for p in ("https://", "http://"):
+        if domain_clean.startswith(p):
+            domain_clean = domain_clean[len(p):]
+    if "/" in domain_clean:
+        domain_clean = domain_clean.split("/")[0]
+    domain_clean = domain_clean.rstrip("/").split(":")[0]  # убрать порт
+    if not domain_clean or domain_clean == "localhost":
+        return False, "Invalid domain for SSL"
     try:
         client = _get_ssh_client(server)
         cmd = (
-            f"certbot certonly --webroot -w {webroot} -d {domain} "
+            f"certbot certonly --webroot -w {webroot} -d {domain_clean} "
             "--non-interactive --agree-tos --register-unsafely-without-email "
             "2>&1 || true"
         )
         stdin, stdout, stderr = client.exec_command(cmd, timeout=120)
         out = (stdout.read().decode() or "") + (stderr.read().decode() or "")
         client.close()
-        return "Successfully received certificate" in out or "Certificate not yet due for renewal" in out, out or "OK"
+        ok = "Successfully received certificate" in out or "Certificate not yet due for renewal" in out
+        if ok:
+            # Пытаемся настроить nginx на 443, чтобы HTTPS заработал
+            nginx_msg = _configure_nginx_443(client_factory=lambda: _get_ssh_client(server), domain=domain_clean, webroot=webroot)
+            if nginx_msg:
+                out = out.rstrip() + "\n" + nginx_msg
+        return ok, out or "OK"
     except Exception as e:
         return False, str(e)
+
+
+def _configure_nginx_443(client_factory, domain: str, webroot: str) -> str:
+    """После успешного certbot создаём конфиг nginx для listen 443 и перезагружаем nginx. Возвращает сообщение для лога."""
+    import base64
+    config = f"""server {{
+  listen 443 ssl;
+  server_name {domain};
+  ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;
+  root {webroot.rstrip('/')};
+  index index.html;
+  location / {{
+    try_files $uri $uri/ $uri/index.html =404;
+  }}
+}}
+"""
+    safe_name = domain.replace(".", "_")
+    try:
+        client = client_factory()
+        b64 = base64.b64encode(config.encode()).decode()
+        # Записываем через base64, чтобы не ломать кавычки в shell
+        cmd = f"echo '{b64}' | base64 -d > /etc/nginx/conf.d/dorvey-ssl-{safe_name}.conf 2>/dev/null && nginx -t 2>&1 && (systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null) && echo 'Nginx HTTPS configured' || echo 'Nginx: write/reload failed (check permissions)'"
+        stdin, stdout, stderr = client.exec_command(cmd, timeout=15)
+        out = (stdout.read().decode() or "") + (stderr.read().decode() or "")
+        client.close()
+        return out.strip() if out else ""
+    except Exception as e:
+        return f"Nginx config skip: {e}"
 
 
 def _append_sub_id(url: str, doorway_id: int, offer_id: Optional[int] = None, source: Optional[str] = None) -> str:

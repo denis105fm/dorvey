@@ -78,6 +78,47 @@ async def preview_doorway(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/doorway/{doorway_id}/ssl")
+async def doorway_ssl(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Запустить Certbot для домена этого дорвея и настроить Nginx на 443.
+    Не делает полный деплой — только SSL. Полезно, если HTTPS не заработал при деплое или домен уже открыт по HTTP.
+    """
+    r = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    row = r.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Doorway not found")
+    dw, _camp = row
+    r2 = await db.execute(
+        select(Domain, Server)
+        .join(Server, Domain.server_id == Server.id)
+        .where(Domain.id == dw.domain_id)
+    )
+    row2 = r2.first()
+    if not row2:
+        raise HTTPException(status_code=404, detail="Domain or server not found")
+    dom, srv = row2
+    if getattr(srv, "auth_type", None) == "ftp":
+        raise HTTPException(status_code=400, detail="SSL доступен только для серверов с SSH (не FTP)")
+    ssl_ok, ssl_msg = await asyncio.to_thread(
+        run_certbot_ssl,
+        srv,
+        dom.domain,
+        srv.path or "/var/www/html",
+    )
+    if ssl_ok:
+        return {"status": "ok", "message": ssl_msg or "SSL сертификат получен, Nginx настроен на 443"}
+    raise HTTPException(status_code=500, detail=ssl_msg or "Certbot failed")
+
+
 @router.post("/doorway/{doorway_id}")
 async def deploy_doorway(
     doorway_id: int,
@@ -170,8 +211,8 @@ async def deploy_doorway(
             )
             if ssl_ok:
                 msg += "; SSL certificate issued"
-            elif "certificate" in ssl_msg.lower():
-                msg += "; " + ssl_msg[:200]
+            else:
+                msg += "; SSL: " + (ssl_msg[:500] if ssl_msg else "certbot failed")
     from datetime import datetime
     dw.status = "deployed"
     dw.deployed_at = datetime.utcnow()

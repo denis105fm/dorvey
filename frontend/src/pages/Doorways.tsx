@@ -65,6 +65,7 @@ export default function Doorways() {
   const [qualityApplySelectedIds, setQualityApplySelectedIds] = useState<Set<number>>(new Set());
   const [qualityApplyFixCodes, setQualityApplyFixCodes] = useState<Set<string>>(new Set());
   const [batchDeployTaskId, setBatchDeployTaskId] = useState<string | null>(null);
+  const [batchDeployModalOpen, setBatchDeployModalOpen] = useState(false);
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -155,7 +156,10 @@ export default function Doorways() {
   const batchDeployMut = useMutation({
     mutationFn: (doorway_ids: number[]) => api.post("/deploy/batch", { doorway_ids }).then((r) => r.data),
     onSuccess: (data: { status?: string; task_id?: string; doorway_ids?: number[] }) => {
-      if (data.task_id) setBatchDeployTaskId(data.task_id);
+      if (data.task_id) {
+        setBatchDeployTaskId(data.task_id);
+        setBatchDeployModalOpen(true);
+      }
       setSelectedDoorwayIds(new Set());
       const n = data.doorway_ids?.length ?? 0;
       toast.success(
@@ -353,6 +357,14 @@ export default function Doorways() {
     },
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
+  const runSslMut = useMutation({
+    mutationFn: (doorwayId: number) => api.post(`/deploy/doorway/${doorwayId}/ssl`).then((r) => r.data),
+    onSuccess: (data: { message?: string }) => {
+      toast.success(data?.message ?? "SSL сертификат получен, HTTPS настроен");
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) =>
+      toast.error(e?.response?.data?.detail ?? "Ошибка SSL (Certbot)"),
   });
 
   const openPanel = (id: number, type: "quality" | "predict" | "broken" | "forecast" | "sources") => {
@@ -684,6 +696,14 @@ export default function Doorways() {
                       {batchDeployMut.isPending ? "Отправка…" : `Деплой выбранных (${selectedDeployable.length})`}
                     </button>
                   )}
+                  {batchDeployTaskId && (batchDeployStatus?.status === "running" || batchDeployStatus?.status === "paused") && !batchDeployModalOpen && (
+                    <button
+                      onClick={() => setBatchDeployModalOpen(true)}
+                      className="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg text-sm"
+                    >
+                      Прогресс деплоя
+                    </button>
+                  )}
                   {selectedCount > 0 && (
                     <button
                       onClick={() => batchQualityMut.mutate(Array.from(selectedDoorwayIds))}
@@ -849,6 +869,9 @@ export default function Doorways() {
                             </DropdownMenuItem>
                             {canDeploy && (
                               <DropdownMenuItem onClick={() => setDeployDoorwayId(d.id)}>Деплой</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => runSslMut.mutate(d.id)} disabled={runSslMut.isPending}>
+                              {runSslMut.isPending ? "SSL…" : "Получить SSL"}
+                            </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => setRecsDoorwayId(recsDoorwayId === d.id ? null : d.id)}>Рекомендации</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setVariantsDoorwayId(variantsDoorwayId === d.id ? null : d.id)}>
@@ -1127,13 +1150,13 @@ export default function Doorways() {
         </div>
       )}
 
-      {batchDeployTaskId && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { if (batchDeployStatus?.status === "completed" || batchDeployStatus?.status === "cancelled") { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); } }}>
+      {batchDeployTaskId && batchDeployModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { if (batchDeployStatus?.status === "completed" || batchDeployStatus?.status === "cancelled") { setBatchDeployTaskId(null); setBatchDeployModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); } else { setBatchDeployModalOpen(false); } }}>
           <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
               <span>Пакетный деплой</span>
               <button
-                onClick={() => { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
+                onClick={() => { if (batchDeployStatus?.status === "completed" || batchDeployStatus?.status === "cancelled") { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); } setBatchDeployModalOpen(false); }}
                 className="text-slate-400 hover:text-white"
               >
                 ✕
@@ -1149,7 +1172,12 @@ export default function Doorways() {
                       {batchDeployStatus.status === "completed" && "Завершён"}
                       {batchDeployStatus.status === "cancelled" && "Отменён"}
                     </span>
-                    <span>{batchDeployStatus.current_index ?? 0} / {batchDeployStatus.total ?? 0}</span>
+                    <span>
+                      {batchDeployStatus.current_index ?? 0} / {batchDeployStatus.total ?? 0}
+                      {batchDeployStatus.total
+                        ? ` (${Math.round(((batchDeployStatus.current_index ?? 0) / batchDeployStatus.total) * 100)}%)`
+                        : ""}
+                    </span>
                   </div>
                   <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
                     <div
@@ -1162,26 +1190,36 @@ export default function Doorways() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-600 text-slate-400 text-left">
-                        <th className="py-2 px-2 font-medium">Статус</th>
+                        <th className="py-2 px-2 font-medium w-24">Статус</th>
                         <th className="py-2 px-2 font-medium">Путь</th>
                         <th className="py-2 px-2 font-medium">Домен</th>
                         <th className="py-2 px-2 font-medium">Сообщение</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(batchDeployStatus.results ?? []).map((r) => (
-                        <tr key={r.doorway_id} className="border-b border-slate-700/50">
-                          <td className="py-2 px-2">
-                            {r.status === "pending" && <span className="text-slate-500">В очереди</span>}
-                            {r.status === "deploying" && <span className="text-amber-400">Деплой…</span>}
-                            {r.status === "success" && <span className="text-emerald-400">✓</span>}
-                            {r.status === "error" && <span className="text-red-400">Ошибка</span>}
-                          </td>
-                          <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path || "—"}</td>
-                          <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain || "—"}</td>
-                          <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
-                        </tr>
-                      ))}
+                      {(batchDeployStatus.results ?? []).map((r) => {
+                        const isDeploying = r.status === "deploying";
+                        return (
+                          <tr key={r.doorway_id} className="border-b border-slate-700/50">
+                            <td className="py-2 px-2 align-middle">
+                              {r.status === "pending" && <span className="text-slate-500">В очереди</span>}
+                              {r.status === "deploying" && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-amber-400 text-xs">Деплой…</span>
+                                  <div className="flex-1 min-w-[60px] h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                    <div className="h-full w-1/3 bg-amber-500 rounded-full animate-pulse" style={{ animation: "pulse 1.2s ease-in-out infinite" }} />
+                                  </div>
+                                </div>
+                              )}
+                              {r.status === "success" && <span className="text-emerald-400">✓</span>}
+                              {r.status === "error" && <span className="text-red-400">Ошибка</span>}
+                            </td>
+                            <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path || "—"}</td>
+                            <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain || "—"}</td>
+                            <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1227,7 +1265,7 @@ export default function Doorways() {
                   {(batchDeployStatus.status === "completed" || batchDeployStatus.status === "cancelled") && (
                     <Button
                       variant="secondary"
-                      onClick={() => { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
+                      onClick={() => { setBatchDeployTaskId(null); setBatchDeployModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
                     >
                       Закрыть
                     </Button>
