@@ -427,7 +427,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     r = await db.execute(
         select(Doorway, Domain, Server)
         .join(Domain, Doorway.domain_id == Domain.id)
-        .join(Server, Domain.server_id == Server.id)
+        .outerjoin(Server, Domain.server_id == Server.id)
         .where(Doorway.id == doorway_id)
     )
     row = r.first()
