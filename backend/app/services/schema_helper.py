@@ -224,6 +224,7 @@ DOORWAY_UI_RU = {
     "quiz_next": "Далее",
     "quiz_submit": "Перейти к предложению",
 }
+DOORWAY_UI_EN = {
     "table_name": "Name",
     "table_rate": "Rate",
     "table_amount": "Amount",
