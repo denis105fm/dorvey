@@ -398,6 +398,46 @@ async def doorway_apply_variant(
     return {"status": "ok", "message": f"Variant {data.variant_index} applied"}
 
 
+@router.post("/{doorway_id}/generate-quiz")
+async def doorway_generate_quiz(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate quiz for an existing doorway (topic from title/path, theme from offer/campaign)."""
+    from app.services.generator import generate_quiz_for_doorway
+    quiz_questions, err = await generate_quiz_for_doorway(db, doorway_id, current_user.id)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"quiz_questions": quiz_questions, "message": "Квиз добавлен"}
+
+
+class BatchGenerateQuizRequest(BaseModel):
+    doorway_ids: List[int]
+
+
+@router.post("/batch-generate-quiz")
+async def batch_generate_quiz(
+    data: BatchGenerateQuizRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate quiz for multiple existing doorways. Returns per-doorway results."""
+    from app.services.generator import generate_quiz_for_doorway
+    if not data.doorway_ids:
+        return {"results": [], "message": "Нет дорвеев"}
+    results = []
+    for dw_id in data.doorway_ids:
+        quiz_questions, err = await generate_quiz_for_doorway(db, dw_id, current_user.id)
+        results.append({
+            "doorway_id": dw_id,
+            "ok": err is None,
+            "quiz_questions": quiz_questions if not err else None,
+            "error": err,
+        })
+    return {"results": results}
+
+
 @router.delete("/{doorway_id}", status_code=204)
 async def delete_doorway(
     doorway_id: int,
@@ -535,6 +575,14 @@ async def batch_apply_warnings(
     """Применить исправления по предупреждениям к выбранным дорвеям (один, несколько или все из отчёта)."""
     if not data.doorway_ids or not data.fix_codes:
         return {"applied": {}, "per_doorway": [], "errors": [], "message": "Нет дорвеев или типов исправлений"}
-    from app.services.quality_fixes import batch_apply_warnings as do_batch_apply
-    result = await do_batch_apply(db, data.doorway_ids, data.fix_codes, current_user.id)
-    return result
+    try:
+        from app.services.quality_fixes import batch_apply_warnings as do_batch_apply
+        result = await do_batch_apply(db, data.doorway_ids, data.fix_codes, current_user.id)
+        return result
+    except Exception as e:
+        return {
+            "applied": {},
+            "per_doorway": [],
+            "errors": [str(e)],
+            "message": "Ошибка применения",
+        }

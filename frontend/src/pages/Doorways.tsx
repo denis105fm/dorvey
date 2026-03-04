@@ -176,9 +176,16 @@ export default function Doorways() {
       qc.invalidateQueries({ queryKey: ["doorways"] });
       const n = Object.values(data.applied || {}).reduce((a, b) => a + b, 0);
       if (n > 0) toast.success(`Применено исправлений: ${n}`);
-      if (data.errors?.length) toast.warning(data.errors.slice(0, 2).join("; "));
+      if (data.errors?.length) {
+        const msg = data.errors.slice(0, 3).join("; ");
+        if (n === 0) toast.error(msg); else toast.warning(msg);
+      }
     },
-    onError: () => toast.error("Ошибка применения"),
+    onError: (e: { response?: { data?: { detail?: string; errors?: string[]; message?: string } }; message?: string }) => {
+      const d = e?.response?.data;
+      const msg = Array.isArray(d?.errors) ? d.errors.slice(0, 2).join("; ") : (typeof d?.detail === "string" ? d.detail : d?.message) || e?.message || "Ошибка применения";
+      toast.error(msg);
+    },
   });
   const batchMut = useMutation({
     mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean; generate_quiz?: boolean }) =>
@@ -302,6 +309,23 @@ export default function Doorways() {
       toast.success("Квиз обновлён");
     },
     onError: () => toast.error("Ошибка"),
+  });
+  const generateQuizMut = useMutation({
+    mutationFn: (doorwayId: number) => api.post(`/doorways/${doorwayId}/generate-quiz`).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["doorways"] }); toast.success("Квиз добавлен"); },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error((e?.response?.data as { detail?: string })?.detail ?? "Ошибка генерации квиза"),
+  });
+  const batchGenerateQuizMut = useMutation({
+    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-generate-quiz", { doorway_ids }).then((r) => r.data),
+    onSuccess: (data: { results?: { doorway_id: number; ok: boolean; error?: string }[] }) => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      const results = data.results ?? [];
+      const ok = results.filter((r) => r.ok).length;
+      const err = results.filter((r) => !r.ok).length;
+      if (ok) toast.success(`Квиз добавлен: ${ok}`);
+      if (err) toast.warning(`Ошибки: ${err}`);
+    },
+    onError: () => toast.error("Ошибка пакетной генерации квиза"),
   });
   const cloneToDomainMut = useMutation({
     mutationFn: ({ id, domain_id, path }: { id: number; domain_id: number; path: string }) =>
@@ -655,6 +679,15 @@ export default function Doorways() {
                   )}
                   {selectedCount > 0 && (
                     <button
+                      onClick={() => batchGenerateQuizMut.mutate(Array.from(selectedDoorwayIds))}
+                      disabled={batchGenerateQuizMut.isPending}
+                      className="px-4 py-2 bg-teal-600/80 hover:bg-teal-600 disabled:opacity-50 text-white rounded-lg text-sm"
+                    >
+                      {batchGenerateQuizMut.isPending ? "Генерация квизов…" : `Добавить квиз к выбранным (${selectedCount})`}
+                    </button>
+                  )}
+                  {selectedCount > 0 && (
+                    <button
                       onClick={() => window.confirm(`Удалить выбранные дорвеи (${selectedCount})?`) && batchDeleteMut.mutate(Array.from(selectedDoorwayIds))}
                       disabled={batchDeleteMut.isPending}
                       className="px-4 py-2 bg-red-600/80 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg text-sm"
@@ -794,6 +827,14 @@ export default function Doorways() {
                                 disabled={quizToggleMut.isPending}
                               >
                                 Квиз: {(d.cloaking_rules as { quiz?: { enabled?: boolean } })?.quiz?.enabled ? "выкл" : "вкл"}
+                              </DropdownMenuItem>
+                            )}
+                            {((d.cloaking_rules as { quiz?: { questions?: unknown[] } })?.quiz?.questions?.length ?? 0) === 0 && (
+                              <DropdownMenuItem
+                                onClick={() => generateQuizMut.mutate(d.id)}
+                                disabled={generateQuizMut.isPending}
+                              >
+                                Добавить квиз
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => openPanel(d.id, "quality")}>Quality</DropdownMenuItem>
@@ -1067,6 +1108,25 @@ export default function Doorways() {
                   </Button>
                 </div>
               </div>
+            )}
+            {batchQualityResults.length > 0 && (
+              <p className="text-slate-500 text-xs mb-2">
+                Рекомендации AI по дорвеям: в меню Действия → Рекомендации для каждого дорвея. Или выберите строки и откройте рекомендации для первого выбранного:
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="ml-2"
+                  onClick={() => {
+                    const id = qualityApplySelectedIds.size > 0
+                      ? Array.from(qualityApplySelectedIds)[0]
+                      : batchQualityResults[0].doorway_id;
+                    setRecsDoorwayId(id);
+                    setBatchQualityResults(null);
+                  }}
+                >
+                  Открыть рекомендации
+                </Button>
+              </p>
             )}
             <div className="overflow-y-auto flex-1 min-h-0">
               <table className="w-full text-sm">

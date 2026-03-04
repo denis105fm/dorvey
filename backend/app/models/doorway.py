@@ -23,6 +23,7 @@ class Doorway(Base):
     status = Column(String(30), default="draft")  # draft, deployed, indexed, optimizing, paused
     pause_reason = Column(String(500), nullable=True)  # причина авто-паузы (например: мало выручки)
     layout_index = Column(Integer, nullable=True)  # override A/B layout (0..N-1); null = compute from domain/path/id
+    applied_recommendation_hashes = Column(JSONB, default=list)  # hashes of applied AI rec texts, to avoid suggesting again
     created_at = Column(DateTime, default=datetime.utcnow)
     deployed_at = Column(DateTime, nullable=True)
     indexed_at = Column(DateTime, nullable=True)

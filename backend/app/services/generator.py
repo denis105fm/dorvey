@@ -1,13 +1,14 @@
 """Doorway content generator: AI + templates + validation."""
 
 import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.campaign import Campaign
 from app.models.domain import Domain
+from app.models.doorway import Doorway
 from app.models.offer import Offer
 from app.models.setting import Setting
 from app.services.openai_service import openai_service
@@ -193,3 +194,53 @@ async def generate_doorway(
     )
     data["html"] = html
     return data
+
+
+async def generate_quiz_for_doorway(
+    db: AsyncSession,
+    doorway_id: int,
+    user_id: int,
+) -> Tuple[Optional[list], Optional[str]]:
+    """
+    Generate quiz for an existing doorway (topic from title/path, theme from offer/campaign).
+    Returns (quiz_questions, error_message). If error_message is set, quiz_questions is None.
+    """
+    r = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.id == doorway_id, Campaign.user_id == user_id)
+    )
+    row = r.first()
+    if not row:
+        return None, "Doorway not found"
+    dw, camp = row
+    keyword = (dw.title or dw.path or "topic").strip()
+    if not keyword or keyword == "/":
+        keyword = (camp.name or "topic").strip()[:80]
+    keyword = keyword.replace("/", " ").strip()[:100] or "topic"
+    user_openai_key = await get_user_openai_key(db, camp.user_id)
+    if not openai_service.is_available(user_openai_key):
+        return None, "OpenAI недоступен"
+    offer_theme = None
+    off_r = await db.execute(
+        select(Offer.name).where(Offer.campaign_id == camp.id, Offer.name.isnot(None), Offer.name != "").limit(1)
+    )
+    off_row = off_r.first()
+    if off_row and off_row[0]:
+        offer_theme = (off_row[0] or "").strip()[:100]
+    if not offer_theme and camp.name:
+        offer_theme = (camp.name or "").strip()[:100]
+    quiz_questions = await openai_service.generate_quiz(
+        keyword=keyword,
+        language=camp.language or "ru",
+        offer_theme=offer_theme,
+        max_questions=5,
+        api_key_override=user_openai_key,
+    )
+    if not quiz_questions:
+        return None, "Не удалось сгенерировать квиз"
+    cr = dict(dw.cloaking_rules or {})
+    cr["quiz"] = {"enabled": True, "questions": quiz_questions}
+    dw.cloaking_rules = cr
+    await db.commit()
+    return quiz_questions, None

@@ -1,5 +1,6 @@
 """AI Optimizer: recommendations, rollback, A/B winner selection."""
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -55,6 +56,8 @@ async def get_recommendations(
             recs.append({"type": "cr", "text": "Низкая CR. Проверьте CTA и оффер."})
         if avg_pos > 10 and total_imp > 0:
             recs.append({"type": "position", "text": f"Позиция {avg_pos:.1f}. Добавьте контент."})
+        applied_hashes = set(dw.applied_recommendation_hashes or [])
+        recs = [r for r in recs if _rec_hash(r.get("text") or "") not in applied_hashes]
         return recs or [{"type": "info", "text": "Метрики в норме."}]
 
     prompt = f"""Дорвей title="{dw.title}". Метрики: показы={total_imp}, клики={total_clk}, CTR={ctr:.2f}%, конв={total_conv}, CR={cr:.2f}%, выручка={total_rev:.2f}, ср.позиция={avg_pos:.1f}.
@@ -72,9 +75,14 @@ JSON: [{{"type":"ctr|cr|position|content","text":"конкретный сове�
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        return json.loads(text)
+        recs = json.loads(text)
     except Exception:
         return [{"type": "info", "text": "Анализ недоступен."}]
+
+    # Don't suggest recommendations that were already applied
+    applied_hashes = set(dw.applied_recommendation_hashes or [])
+    filtered = [r for r in (recs if isinstance(recs, list) else []) if _rec_hash(r.get("text") or "") not in applied_hashes]
+    return filtered if filtered else [{"type": "info", "text": "Все предыдущие рекомендации применены. Метрики в норме или соберите больше данных."}]
 
 
 async def rollback_doorway(db: AsyncSession, doorway_id: int) -> tuple:
@@ -241,6 +249,13 @@ JSON: {{"title":"...", "meta_description":"...", "content":"..."}}
     if data.get("content"):
         dw.content = data["content"]
         updated["content"] = dw.content
+
+    # Remember this recommendation so we don't suggest it again
+    hashes = list(dw.applied_recommendation_hashes or [])
+    h = _rec_hash(rec_text)
+    if h not in hashes:
+        hashes.append(h)
+        dw.applied_recommendation_hashes = hashes
 
     await db.commit()
     return True, "Авто-правка применена", updated
