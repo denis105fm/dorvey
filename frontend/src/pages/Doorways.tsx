@@ -64,7 +64,22 @@ export default function Doorways() {
   const [batchQualityResults, setBatchQualityResults] = useState<Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[]; warning_codes?: { code: string; message: string }[] }> | null>(null);
   const [qualityApplySelectedIds, setQualityApplySelectedIds] = useState<Set<number>>(new Set());
   const [qualityApplyFixCodes, setQualityApplyFixCodes] = useState<Set<string>>(new Set());
-  const [batchDeployTaskId, setBatchDeployTaskId] = useState<string | null>(null);
+  const [batchDeployTaskId, setBatchDeployTaskIdState] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem("dorvey_batch_deploy_task_id") || null;
+    } catch {
+      return null;
+    }
+  });
+  const setBatchDeployTaskId = (id: string | null) => {
+    setBatchDeployTaskIdState(id);
+    try {
+      if (id) sessionStorage.setItem("dorvey_batch_deploy_task_id", id);
+      else sessionStorage.removeItem("dorvey_batch_deploy_task_id");
+    } catch {
+      /* ignore */
+    }
+  };
   const [batchDeployModalOpen, setBatchDeployModalOpen] = useState(false);
 
   const { data: doorways, isLoading } = useQuery({
@@ -696,7 +711,7 @@ export default function Doorways() {
                       {batchDeployMut.isPending ? "Отправка…" : `Деплой выбранных (${selectedDeployable.length})`}
                     </button>
                   )}
-                  {batchDeployTaskId && (batchDeployStatus?.status === "running" || batchDeployStatus?.status === "paused") && !batchDeployModalOpen && (
+                  {batchDeployTaskId && !batchDeployModalOpen && (batchDeployStatus?.status === "running" || batchDeployStatus?.status === "paused" || batchDeployStatus === undefined) && (
                     <button
                       onClick={() => setBatchDeployModalOpen(true)}
                       className="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg text-sm"
