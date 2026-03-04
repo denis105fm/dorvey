@@ -65,21 +65,25 @@ export function DropdownMenuItem({
   onClick,
   className,
   variant = "default",
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   className?: string;
   variant?: "default" | "danger";
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={() => {
-        onClick?.();
+        if (!disabled) onClick?.();
       }}
       className={cn(
         "w-full px-3 py-2 text-left text-sm transition-colors",
         variant === "default" ? "text-slate-300 hover:bg-slate-700 hover:text-white" : "text-red-400 hover:bg-red-500/10 hover:text-red-300",
+        disabled && "pointer-events-none opacity-50",
         className
       )}
     >
