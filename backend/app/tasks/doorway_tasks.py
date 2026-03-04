@@ -153,17 +153,65 @@ def deploy_doorway_async(doorway_id: int):
         return {"status": "error", "message": str(e)}
 
 
-@celery_app.task
+@celery_app.task(bind=True)
 def deploy_batch_with_stagger(
+    self,
     doorway_ids: list[int],
     min_delay_sec: float = 30,
     max_delay_sec: float = 180,
 ):
     """
     Deploy multiple doorways with staggered delays (anti-detection).
-    Prevents mass synchronous publishes.
+    Progress/pause/cancel stored in Redis under deploy_batch:{task_id}.
     """
     from app.services.anti_detection import StaggerConfig, sleep_for_stagger
+    from app.services.batch_deploy_state import get_state, set_state, update_state
+    import time
+
+    task_id = self.request.id
+    cfg = StaggerConfig(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)
+    total = len(doorway_ids)
+    results = [{"doorway_id": dw_id, "status": "pending", "message": None} for dw_id in doorway_ids]
+    existing = get_state(task_id) or {}
+    existing.update({
+        "status": "running",
+        "doorway_ids": doorway_ids,
+        "current_index": 0,
+        "results": results,
+        "total": total,
+        "error": None,
+    })
+    set_state(task_id, existing)
+
+    def check_pause_cancel() -> bool:
+        """Return True to break (cancelled), False to continue."""
+        s = get_state(task_id)
+        if not s:
+            return False
+        if s.get("status") == "cancelled":
+            return True
+        while s.get("status") == "paused":
+            time.sleep(1)
+            s = get_state(task_id)
+            if s and s.get("status") == "cancelled":
+                return True
+        return False
+
+    def check_pause_cancel() -> bool:
+        """Return True to break (cancelled), False to continue."""
+        s = get_state(task_id)
+        if not s:
+            return False
+        if s.get("status") == "cancelled":
+            return True
+        while s.get("status") == "paused":
+            time.sleep(1)
+            s = get_state(task_id)
+            if s and s.get("status") == "cancelled":
+                return True
+        return False
+
+    results_out: list = []
 
     import asyncio
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -178,19 +226,25 @@ def deploy_batch_with_stagger(
     from app.services.indexing import get_doorway_url, generate_sitemap_xml, generate_robots_txt
     from datetime import datetime
 
-    cfg = StaggerConfig(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)(min_delay_sec=min_delay_sec, max_delay_sec=max_delay_sec)
-    results: list = []
-    total = len(doorway_ids)
-
     async def run():
         engine = create_async_engine(settings.DATABASE_URL)
         async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with async_session() as db:
             for i, dw_id in enumerate(doorway_ids):
+                if check_pause_cancel():
+                    break
+                update_state(task_id, current_index=i, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
+                results[i]["status"] = "deploying"
+                update_state(task_id, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
                 sleep_for_stagger(i, total, cfg)
+                if check_pause_cancel():
+                    break
                 html = await prepare_doorway_html(db, dw_id, for_bot=False)
                 if not html:
-                    results.append({"doorway_id": dw_id, "ok": False, "msg": "Could not prepare HTML"})
+                    results[i]["status"] = "error"
+                    results[i]["message"] = "Could not prepare HTML"
+                    results_out.append({"doorway_id": dw_id, "ok": False, "msg": "Could not prepare HTML"})
+                    update_state(task_id, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
                     continue
                 r = await db.execute(
                     select(Doorway, Domain, Server, Campaign)
@@ -201,12 +255,18 @@ def deploy_batch_with_stagger(
                 )
                 row = r.first()
                 if not row:
-                    results.append({"doorway_id": dw_id, "ok": False, "msg": "Not found"})
+                    results[i]["status"] = "error"
+                    results[i]["message"] = "Not found"
+                    results_out.append({"doorway_id": dw_id, "ok": False, "msg": "Not found"})
+                    update_state(task_id, results=[{"doorway_id": r["doorway_id"], "status": r["status"], "message": r.get("message")} for r in results])
                     continue
                 dw, dom, srv, camp = row
                 ok, msg = deploy_doorway_sync(srv, dom.domain, dw.path or "/", html, srv.path)
                 if not ok:
-                    results.append({"doorway_id": dw_id, "ok": False, "msg": msg})
+                    results[i]["status"] = "error"
+                    results[i]["message"] = msg
+                    results_out.append({"doorway_id": dw_id, "ok": False, "msg": msg})
+                    update_state(task_id, results=[{"doorway_id": r["doorway_id"], "status": r["status"], "message": r.get("message")} for r in results])
                     continue
                 camp_cloaking = (camp.affiliate_rules or {}).get("cloaking") or {}
                 dw_cloaking = (dw.cloaking_rules or {}).get("cloaking") or {}
@@ -274,7 +334,10 @@ def deploy_batch_with_stagger(
                             await submit_to_indexnow(url_in, indexnow_key, f"{domain_origin}/{indexnow_key}.txt")
                     except Exception:
                         pass
-                results.append({"doorway_id": dw_id, "ok": True, "msg": msg})
+                results[i]["status"] = "success"
+                results[i]["message"] = msg
+                results_out.append({"doorway_id": dw_id, "ok": True, "msg": msg})
+                update_state(task_id, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
                 url = await get_doorway_url(db, dw_id)
                 if url and camp:
                     cred_r = await db.execute(
@@ -301,12 +364,16 @@ def deploy_batch_with_stagger(
                         if creds.get("bing_api_key"):
                             await submit_to_bing(url, creds["bing_api_key"])
             await db.commit()
-        return {"status": "ok", "results": results}
+        final_status = "cancelled" if get_state(task_id) and get_state(task_id).get("status") == "cancelled" else "completed"
+        update_state(task_id, status=final_status, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
+        return {"status": "ok", "results": results_out}
 
     try:
-        return asyncio.run(run())
+        out = asyncio.run(run())
+        return out
     except Exception as e:
-        return {"status": "error", "message": str(e), "results": results}
+        update_state(task_id, status="completed", error=str(e))
+        return {"status": "error", "message": str(e), "results": results_out}
 
 
 @celery_app.task

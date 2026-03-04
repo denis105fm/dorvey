@@ -1,5 +1,6 @@
 """Deploy API."""
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -289,4 +290,96 @@ async def deploy_batch(
         min_delay_sec=body.min_delay_sec,
         max_delay_sec=body.max_delay_sec,
     )
+    from app.services.batch_deploy_state import set_state
+    set_state(task.id, {"user_id": current_user.id})
     return {"status": "queued", "task_id": task.id, "doorway_ids": ids}
+
+
+async def _get_batch_state_for_user(task_id: str, user_id: int):
+    from app.services.batch_deploy_state import get_state
+    state = await asyncio.to_thread(get_state, task_id)
+    if not state or state.get("user_id") != user_id:
+        return None
+    return state
+
+
+@router.get("/batch/{task_id}/status")
+async def batch_deploy_status(
+    task_id: str,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get batch deploy progress (list, progress bar data)."""
+    state = await _get_batch_state_for_user(task_id, current_user.id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Task not found")
+    doorway_ids = state.get("doorway_ids") or []
+    results = state.get("results") or []
+    # Enrich with path/domain for display
+    if doorway_ids:
+        r = await db.execute(
+            select(Doorway.id, Doorway.path, Domain.domain)
+            .join(Campaign, Doorway.campaign_id == Campaign.id)
+            .join(Domain, Doorway.domain_id == Domain.id)
+            .where(Doorway.id.in_(doorway_ids), Campaign.user_id == current_user.id)
+        )
+        info = {row[0]: {"path": row[1] or "", "domain": (row[2] or "").strip()} for row in r.all()}
+    else:
+        info = {}
+    items = []
+    for x in results:
+        d = info.get(x.get("doorway_id") or 0) or {}
+        items.append({
+            "doorway_id": x.get("doorway_id"),
+            "status": x.get("status", "pending"),
+            "message": x.get("message"),
+            "path": d.get("path", ""),
+            "domain": d.get("domain", ""),
+        })
+    return {
+        "task_id": task_id,
+        "status": state.get("status", "running"),
+        "total": state.get("total", 0),
+        "current_index": state.get("current_index", 0),
+        "error": state.get("error"),
+        "results": items,
+    }
+
+
+@router.post("/batch/{task_id}/pause")
+async def batch_deploy_pause(task_id: str, current_user: CurrentUser):
+    """Pause batch deploy."""
+    state = await _get_batch_state_for_user(task_id, current_user.id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if state.get("status") not in ("running",):
+        return {"status": state.get("status"), "message": "Already paused or finished"}
+    from app.services.batch_deploy_state import update_state
+    await asyncio.to_thread(update_state, task_id, status="paused")
+    return {"status": "paused"}
+
+
+@router.post("/batch/{task_id}/resume")
+async def batch_deploy_resume(task_id: str, current_user: CurrentUser):
+    """Resume batch deploy."""
+    state = await _get_batch_state_for_user(task_id, current_user.id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if state.get("status") != "paused":
+        return {"status": state.get("status"), "message": "Not paused"}
+    from app.services.batch_deploy_state import update_state
+    await asyncio.to_thread(update_state, task_id, status="running")
+    return {"status": "running"}
+
+
+@router.post("/batch/{task_id}/cancel")
+async def batch_deploy_cancel(task_id: str, current_user: CurrentUser):
+    """Cancel batch deploy."""
+    state = await _get_batch_state_for_user(task_id, current_user.id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if state.get("status") in ("completed", "cancelled"):
+        return {"status": state.get("status"), "message": "Already finished"}
+    from app.services.batch_deploy_state import update_state
+    await asyncio.to_thread(update_state, task_id, status="cancelled")
+    return {"status": "cancelled"}

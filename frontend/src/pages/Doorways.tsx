@@ -64,6 +64,7 @@ export default function Doorways() {
   const [batchQualityResults, setBatchQualityResults] = useState<Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[]; warning_codes?: { code: string; message: string }[] }> | null>(null);
   const [qualityApplySelectedIds, setQualityApplySelectedIds] = useState<Set<number>>(new Set());
   const [qualityApplyFixCodes, setQualityApplyFixCodes] = useState<Set<string>>(new Set());
+  const [batchDeployTaskId, setBatchDeployTaskId] = useState<string | null>(null);
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -89,6 +90,15 @@ export default function Doorways() {
   const { data: earlyDoorways } = useQuery({
     queryKey: ["analytics-early-doorways", 3, 20],
     queryFn: () => api.get("/analytics/early-doorways", { params: { days: 3, min_clicks: 20 } }).then((r) => r.data),
+  });
+  const { data: batchDeployStatus, refetch: refetchBatchDeployStatus } = useQuery({
+    queryKey: ["deploy-batch-status", batchDeployTaskId],
+    queryFn: () => api.get(`/deploy/batch/${batchDeployTaskId}/status`).then((r) => r.data as { task_id: string; status: string; total: number; current_index: number; error?: string; results: Array<{ doorway_id: number; status: string; message?: string | null; path: string; domain: string }> }),
+    enabled: !!batchDeployTaskId,
+    refetchInterval: (query) => {
+      const d = query.state.data as { status?: string } | undefined;
+      return d && (d.status === "running" || d.status === "paused") ? 2500 : false;
+    },
   });
   const metricsByDoorway = useMemo(() => {
     const map = new Map<number, DoorwayMetric>();
@@ -145,9 +155,15 @@ export default function Doorways() {
   const batchDeployMut = useMutation({
     mutationFn: (doorway_ids: number[]) => api.post("/deploy/batch", { doorway_ids }).then((r) => r.data),
     onSuccess: (data: { status?: string; task_id?: string; doorway_ids?: number[] }) => {
-      qc.invalidateQueries({ queryKey: ["doorways"] });
+      if (data.task_id) setBatchDeployTaskId(data.task_id);
       setSelectedDoorwayIds(new Set());
-      toast.success(`Деплой в очередь: ${data.doorway_ids?.length ?? 0} дорвеев. Обработка по очереди с задержкой.`);
+      const n = data.doorway_ids?.length ?? 0;
+      toast.success(
+        n > 0
+          ? `Деплой запущен: ${n} дорвеев. Откройте окно прогресса для паузы или отмены.`
+          : "Деплой в очередь.",
+        { duration: 5000 }
+      );
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка массового деплоя"),
   });
@@ -1054,28 +1070,172 @@ export default function Doorways() {
             </h2>
             {deployCheck ? (
               <div className="space-y-3">
-                <p className={deployCheck.ok ? "text-emerald-400 text-sm" : "text-amber-400 text-sm"}>
-                  {deployCheck.ok ? "✓ Готов к деплою" : "⚠ Есть замечания (можно деплоить)"}
-                </p>
-                {deployCheck.errors?.length ? (
-                  <ul className="text-red-400 text-sm space-y-1">
-                    {deployCheck.errors.map((e: string, i: number) => <li key={i}>• {e}</li>)}
-                  </ul>
-                ) : null}
-                {deployCheck.warnings?.length ? (
-                  <ul className="text-amber-400 text-sm space-y-1">
-                    {deployCheck.warnings.map((w: string, i: number) => <li key={i}>• {w}</li>)}
-                  </ul>
-                ) : null}
-                <div className="flex gap-2 pt-2">
-                  <Button onClick={() => setDeployDoorwayId(null)} variant="secondary">Отмена</Button>
-                  <Button onClick={() => { deployMut.mutate(deployDoorwayId); setDeployDoorwayId(null); }} disabled={deployMut.isPending}>
-                    {deployMut.isPending ? "Деплой..." : "Деплоить"}
-                  </Button>
-                </div>
+                {deployMut.isPending && (
+                  <div className="p-3 bg-slate-700/50 rounded-lg border border-slate-600">
+                    <p className="text-slate-300 text-sm">Деплой дорвея #{deployDoorwayId}</p>
+                    <p className="text-slate-400 text-xs mt-1">Подключение к серверу, сборка HTML, отправка файлов…</p>
+                    <div className="mt-2 h-1.5 bg-slate-600 rounded-full overflow-hidden">
+                      <div className="h-full w-1/3 bg-emerald-500 rounded-full animate-pulse" style={{ animation: "pulse 1.5s ease-in-out infinite" }} />
+                    </div>
+                  </div>
+                )}
+                {deployMut.isSuccess && deployMut.data && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                    <p className="text-emerald-400 text-sm font-medium">✓ Деплой выполнен</p>
+                    <p className="text-slate-300 text-xs mt-1 whitespace-pre-wrap">{(deployMut.data as { message?: string }).message ?? "Файлы загружены на сервер."}</p>
+                    <Button className="mt-3" onClick={() => { setDeployDoorwayId(null); deployMut.reset(); }}>Закрыть</Button>
+                  </div>
+                )}
+                {deployMut.isError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                    <p className="text-red-400 text-sm font-medium">Ошибка деплоя</p>
+                    <p className="text-slate-300 text-xs mt-1">{(deployMut.error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Не удалось загрузить на сервер."}</p>
+                    <div className="flex gap-2 mt-3">
+                      <Button variant="secondary" onClick={() => { setDeployDoorwayId(null); deployMut.reset(); }}>Закрыть</Button>
+                      <Button onClick={() => deployMut.mutate(deployDoorwayId)}>Повторить</Button>
+                    </div>
+                  </div>
+                )}
+                {!deployMut.isPending && !deployMut.isSuccess && deployMut.isError === undefined && (
+                  <>
+                    <p className={deployCheck.ok ? "text-emerald-400 text-sm" : "text-amber-400 text-sm"}>
+                      {deployCheck.ok ? "✓ Готов к деплою" : "⚠ Есть замечания (можно деплоить)"}
+                    </p>
+                    {deployCheck.errors?.length ? (
+                      <ul className="text-red-400 text-sm space-y-1">
+                        {deployCheck.errors.map((e: string, i: number) => <li key={i}>• {e}</li>)}
+                      </ul>
+                    ) : null}
+                    {deployCheck.warnings?.length ? (
+                      <ul className="text-amber-400 text-sm space-y-1">
+                        {deployCheck.warnings.map((w: string, i: number) => <li key={i}>• {w}</li>)}
+                      </ul>
+                    ) : null}
+                    <div className="flex gap-2 pt-2">
+                      <Button onClick={() => { setDeployDoorwayId(null); deployMut.reset(); }} variant="secondary">Отмена</Button>
+                      <Button onClick={() => deployMut.mutate(deployDoorwayId)} disabled={deployMut.isPending}>
+                        {deployMut.isPending ? "Деплой…" : "Деплоить"}
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <p className="text-slate-400 text-sm">Загрузка проверки...</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {batchDeployTaskId && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { if (batchDeployStatus?.status === "completed" || batchDeployStatus?.status === "cancelled") { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); } }}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
+              <span>Пакетный деплой</span>
+              <button
+                onClick={() => { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </h2>
+            {batchDeployStatus ? (
+              <>
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-slate-400 mb-1">
+                    <span>
+                      {batchDeployStatus.status === "running" && "В процессе…"}
+                      {batchDeployStatus.status === "paused" && "На паузе"}
+                      {batchDeployStatus.status === "completed" && "Завершён"}
+                      {batchDeployStatus.status === "cancelled" && "Отменён"}
+                    </span>
+                    <span>{batchDeployStatus.current_index ?? 0} / {batchDeployStatus.total ?? 0}</span>
+                  </div>
+                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 transition-all duration-300"
+                      style={{ width: `${batchDeployStatus.total ? Math.round(((batchDeployStatus.current_index ?? 0) / batchDeployStatus.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-600 text-slate-400 text-left">
+                        <th className="py-2 px-2 font-medium">Статус</th>
+                        <th className="py-2 px-2 font-medium">Путь</th>
+                        <th className="py-2 px-2 font-medium">Домен</th>
+                        <th className="py-2 px-2 font-medium">Сообщение</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(batchDeployStatus.results ?? []).map((r) => (
+                        <tr key={r.doorway_id} className="border-b border-slate-700/50">
+                          <td className="py-2 px-2">
+                            {r.status === "pending" && <span className="text-slate-500">В очереди</span>}
+                            {r.status === "deploying" && <span className="text-amber-400">Деплой…</span>}
+                            {r.status === "success" && <span className="text-emerald-400">✓</span>}
+                            {r.status === "error" && <span className="text-red-400">Ошибка</span>}
+                          </td>
+                          <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path || "—"}</td>
+                          <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain || "—"}</td>
+                          <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {batchDeployStatus.error && (
+                  <p className="text-red-400 text-sm mt-2">{batchDeployStatus.error}</p>
+                )}
+                <div className="pt-4 flex gap-2 flex-wrap">
+                  {batchDeployStatus.status === "running" && (
+                    <>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/pause`); refetchBatchDeployStatus(); }}
+                      >
+                        Пауза
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/cancel`); refetchBatchDeployStatus(); }}
+                      >
+                        Отменить
+                      </Button>
+                    </>
+                  )}
+                  {batchDeployStatus.status === "paused" && (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/resume`); refetchBatchDeployStatus(); }}
+                      >
+                        Продолжить
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/cancel`); refetchBatchDeployStatus(); }}
+                      >
+                        Отменить
+                      </Button>
+                    </>
+                  )}
+                  {(batchDeployStatus.status === "completed" || batchDeployStatus.status === "cancelled") && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
+                    >
+                      Закрыть
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-slate-400">Загрузка статуса…</p>
             )}
           </div>
         </div>
