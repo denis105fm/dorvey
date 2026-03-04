@@ -1096,7 +1096,7 @@ export default function Doorways() {
                     </div>
                   </div>
                 )}
-                {!deployMut.isPending && !deployMut.isSuccess && deployMut.isError === undefined && (
+                {!deployMut.isPending && !deployMut.isSuccess && !deployMut.isError && (
                   <>
                     <p className={deployCheck.ok ? "text-emerald-400 text-sm" : "text-amber-400 text-sm"}>
                       {deployCheck.ok ? "✓ Готов к деплою" : "⚠ Есть замечания (можно деплоить)"}
