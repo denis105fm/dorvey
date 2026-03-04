@@ -869,10 +869,10 @@ export default function Doorways() {
                             </DropdownMenuItem>
                             {canDeploy && (
                               <DropdownMenuItem onClick={() => setDeployDoorwayId(d.id)}>Деплой</DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => runSslMut.mutate(d.id)} disabled={runSslMut.isPending}>
                               {runSslMut.isPending ? "SSL…" : "Получить SSL"}
                             </DropdownMenuItem>
-                            )}
                             <DropdownMenuItem onClick={() => setRecsDoorwayId(recsDoorwayId === d.id ? null : d.id)}>Рекомендации</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setVariantsDoorwayId(variantsDoorwayId === d.id ? null : d.id)}>
                               <Layers size={14} className="mr-2" /> Варианты A/B
