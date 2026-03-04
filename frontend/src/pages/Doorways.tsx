@@ -1197,9 +1197,7 @@ export default function Doorways() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(batchDeployStatus.results ?? []).map((r) => {
-                        const isDeploying = r.status === "deploying";
-                        return (
+                      {(batchDeployStatus.results ?? []).map((r) => (
                           <tr key={r.doorway_id} className="border-b border-slate-700/50">
                             <td className="py-2 px-2 align-middle">
                               {r.status === "pending" && <span className="text-slate-500">В очереди</span>}
@@ -1218,8 +1216,7 @@ export default function Doorways() {
                             <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain || "—"}</td>
                             <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
                           </tr>
-                        );
-                      })}
+                      ))}
                     </tbody>
                   </table>
                 </div>
