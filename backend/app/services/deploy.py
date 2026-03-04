@@ -692,7 +692,8 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
                 if isinstance(q, dict) and q.get("question") and isinstance(q.get("options"), list):
                     safe_questions.append({"question": str(q["question"])[:120], "options": [str(o)[:60] for o in q["options"][:4]]})
             if safe_questions:
-                data_questions_esc = _json.dumps(safe_questions, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
+                data_questions_json = _json.dumps(safe_questions, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
+                data_questions_esc = html.escape(data_questions_json)
                 quiz_block = f'''<div id="dv-quiz" class="dv-quiz" data-questions="{data_questions_esc}" data-cta-url="{cta_esc}" data-title="{q_title}" data-submit="{q_submit}"><h2>{q_title}</h2><div class="dv-quiz-question"><p id="dv-quiz-q"></p><div class="dv-quiz-options" id="dv-quiz-opts"></div><div class="dv-quiz-nav"><a id="dv-quiz-cta" href="{cta_esc}" class="cta" rel="nofollow" style="display:none">{q_submit}</a></div></div></div><script>(function(){{var el=document.getElementById("dv-quiz");if(!el)return;var q=JSON.parse(el.getAttribute("data-questions"));var idx=0;var qEl=document.getElementById("dv-quiz-q");var optsEl=document.getElementById("dv-quiz-opts");var ctaLink=document.getElementById("dv-quiz-cta");function show(){{if(idx>=q.length){{optsEl.innerHTML="";ctaLink.style.display="inline-block";return;}}var item=q[idx];qEl.textContent=item.question;optsEl.innerHTML="";item.options.forEach(function(opt){{var b=document.createElement("button");b.type="button";b.textContent=opt;b.onclick=function(){{idx++;show();}};optsEl.appendChild(b);}});}}show();}})();</script>'''
 
     if for_bot:
