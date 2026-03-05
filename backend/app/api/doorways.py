@@ -11,6 +11,9 @@ from app.api.deps import CurrentUser
 from app.core.database import get_db
 from app.models.doorway import Doorway, DoorwayVersion, DoorwayMetrics
 from app.models.campaign import Campaign
+from app.models.domain import Domain
+from app.models.server import Server
+from app.services.deploy import remove_doorway_from_server
 from app.schemas.doorway import (
     DoorwayCreate,
     DoorwayUpdate,
@@ -367,6 +370,21 @@ async def update_doorway(
         setattr(doorway, k, v)
     await db.commit()
     await db.refresh(doorway)
+    # При постановке на паузу снимаем страницу с сервера
+    if payload.get("status") == "paused":
+        srv_r = await db.execute(
+            select(Server)
+            .join(Domain, Domain.server_id == Server.id)
+            .where(Domain.id == doorway.domain_id)
+        )
+        srv_row = srv_r.first()
+        if srv_row:
+            srv = srv_row[0]
+            remove_doorway_from_server(
+                server=srv,
+                path=doorway.path or "/",
+                base_path=srv.path or "/var/www/html",
+            )
     return doorway
 
 
@@ -505,6 +523,23 @@ async def delete_doorway(
     doorway = result.scalar_one_or_none()
     if not doorway:
         raise HTTPException(status_code=404, detail="Doorway not found")
+
+    # Удаляем файлы с сервера до удаления записи
+    srv_r = await db.execute(
+        select(Server)
+        .join(Domain, Domain.server_id == Server.id)
+        .where(Domain.id == doorway.domain_id)
+    )
+    srv_row = srv_r.first()
+    if srv_row:
+        srv = srv_row[0]
+        ok, _ = remove_doorway_from_server(
+            server=srv,
+            path=doorway.path or "/",
+            base_path=srv.path or "/var/www/html",
+        )
+        # не падаем при ошибке удаления с сервера (файла могло не быть)
+
     from app.models.doorway_source_metrics import DoorwaySourceMetrics
     from app.models.ab_variant import DoorwayABVariant
     await db.execute(delete(DoorwayVersion).where(DoorwayVersion.doorway_id == doorway_id))
@@ -537,6 +572,20 @@ async def batch_delete_doorways(
     ids = [row[0] for row in result.all()]
     if not ids:
         return {"deleted": 0, "message": "Нет доступных дорвеев для удаления"}
+    # Снимаем страницы с серверов до удаления записей
+    srv_result = await db.execute(
+        select(Doorway, Server)
+        .join(Domain, Doorway.domain_id == Domain.id)
+        .join(Server, Domain.server_id == Server.id)
+        .where(Doorway.id.in_(ids))
+    )
+    for doorway, server in srv_result.all():
+        remove_doorway_from_server(
+            server=server,
+            path=doorway.path or "/",
+            base_path=server.path or "/var/www/html",
+        )
+        # ошибки не прерывают пакетное удаление
     # Сначала удаляем связанные записи (FK без CASCADE)
     from app.models.doorway_source_metrics import DoorwaySourceMetrics
     from app.models.ab_variant import DoorwayABVariant

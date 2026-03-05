@@ -258,6 +258,102 @@ def deploy_doorway_sync(
         return False, str(e)
 
 
+def remove_doorway_from_server(
+    server: Server,
+    path: str,
+    base_path: str = "/var/www/html",
+) -> tuple[bool, str]:
+    """
+    Remove doorway files from server (index.html and optional index.seo.html).
+    When path is / we remove root index; when path is /slug we remove slug/index.html and optionally the directory.
+    Returns (success, message). Errors (e.g. file not found) are logged but not fatal — returns True if at least one remove succeeded or nothing was there.
+    """
+    path = (path or "/").strip() or "/"
+    root = (base_path or getattr(server, "path", None) or "/var/www/html").rstrip("/")
+    if getattr(server, "auth_type", None) == "ftp":
+        return _remove_doorway_ftp(
+            host=server.host,
+            user=server.user,
+            password=server.auth_data or "",
+            path=path,
+            remote_path=root,
+            port=server.port or 21,
+        )
+    return _remove_doorway_ssh(server, path, root)
+
+
+def _remove_doorway_ssh(server: Server, path: str, root: str) -> tuple[bool, str]:
+    """Remove index.html and index.seo.html via SFTP, then rmdir path if not root."""
+    try:
+        client = _get_ssh_client(server)
+        sftp = client.open_sftp()
+        removed = []
+        for suffix in ("", ".seo"):
+            idx = f"index{suffix}.html" if suffix else "index.html"
+            if path in ("", "/"):
+                remote = f"{root}/{idx}"
+            else:
+                clean = path.strip("/")
+                remote = f"{root}/{clean}/{idx}"
+            try:
+                sftp.remove(remote)
+                removed.append(remote)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                if "No such file" not in str(e):
+                    pass  # ignore
+        if path not in ("", "/"):
+            clean = path.strip("/")
+            dir_path = f"{root}/{clean}"
+            try:
+                sftp.rmdir(dir_path)
+                removed.append(dir_path)
+            except (OSError, FileNotFoundError):
+                pass  # dir not empty or missing
+        sftp.close()
+        client.close()
+        return True, f"Removed from server: {', '.join(removed) or 'nothing was deployed'}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _remove_doorway_ftp(
+    host: str,
+    user: str,
+    password: str,
+    path: str,
+    remote_path: str = "/",
+    port: int = 21,
+) -> tuple[bool, str]:
+    """Remove index.html via FTP."""
+    try:
+        from ftplib import FTP
+        ftp = FTP()
+        ftp.connect(host, port)
+        ftp.login(user, password)
+        root = remote_path.rstrip("/")
+        if path in ("", "/"):
+            ftp.cwd(root)
+            fname = "index.html"
+        else:
+            clean = path.strip("/")
+            ftp.cwd(f"{root}/{clean}")
+            fname = "index.html"
+        try:
+            ftp.delete(fname)
+            msg = f"Removed {fname}"
+        except Exception as e:
+            if "550" in str(e) or "not found" in str(e).lower():
+                msg = "File was not on server"
+            else:
+                raise
+        ftp.quit()
+        return True, msg
+    except Exception as e:
+        return False, str(e)
+
+
 def deploy_sw_push(server: Server, base_path: str = "/var/www/html") -> tuple[bool, str]:
     """Deploy service worker for push to web root. Returns (success, message)."""
     try:
