@@ -40,6 +40,8 @@ const FIX_CODE_LABELS: Record<string, string> = {
 const GEO_OPTIONS = ["US", "DE", "PL", "RU", "GB", "FR", "ES", "IT", "UA", "KZ", "BY", "TR", "BR", "MX", "CA", "AU", "NL"];
 
 const PER_PAGE = 500;
+
+export default function Doorways() {
   const qc = useQueryClient();
   const [wizardStep, setWizardStep] = useState(0);
   const [showGenerate, setShowGenerate] = useState(false);
@@ -235,7 +237,7 @@ const PER_PAGE = 500;
     },
   });
   const batchMut = useMutation({
-    mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean; generate_quiz?: boolean }) =>
+    mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean; generate_quiz?: boolean; target_geos?: string[] }) =>
       api.post("/doorways/generate-batch", payload, { timeout: 600000 }).then((r) => r.data),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["doorways"] });
