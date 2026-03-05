@@ -37,14 +37,14 @@ const FIX_CODE_LABELS: Record<string, string> = {
   no_faq: "Сгенерировать FAQ",
 };
 
-const PER_PAGE = 500;
+const GEO_OPTIONS = ["US", "DE", "PL", "RU", "GB", "FR", "ES", "IT", "UA", "KZ", "BY", "TR", "BR", "MX", "CA", "AU", "NL"];
 
-export default function Doorways() {
+const PER_PAGE = 500;
   const qc = useQueryClient();
   const [wizardStep, setWizardStep] = useState(0);
   const [showGenerate, setShowGenerate] = useState(false);
   const [deployDoorwayId, setDeployDoorwayId] = useState<number | null>(null);
-  const [gen, setGen] = useState({ campaign_id: 1, domain_id: 1, keyword: "", path: "/", save: true, generate_faq: false, generate_quiz: false });
+  const [gen, setGen] = useState({ campaign_id: 1, domain_id: 1, keyword: "", path: "/", save: true, generate_faq: false, generate_quiz: false, target_geos: [] as string[] });
   const [batchKeywords, setBatchKeywords] = useState("");
   const [result, setResult] = useState<{ html?: string; doorway_id?: number; validation_violations?: string[] } | null>(null);
   const [recsDoorwayId, setRecsDoorwayId] = useState<number | null>(null);
@@ -99,6 +99,11 @@ export default function Doorways() {
     queryFn: () => api.get("/keywords/", { params: { campaign_id: gen.campaign_id } }).then((r) => r.data),
     enabled: !!gen.campaign_id && wizardStep === 1,
   });
+  const { data: offerGeos } = useQuery({
+    queryKey: ["keywords", "offer-geos", gen.campaign_id],
+    queryFn: () => api.get("/keywords/suggest-by-offers-geo", { params: { campaign_id: gen.campaign_id } }).then((r) => r.data as { geos?: string[] }),
+    enabled: !!gen.campaign_id && (wizardStep === 0 || wizardStep === 1),
+  });
   const { data: doorwaysMetrics } = useQuery({
     queryKey: ["analytics-doorways-metrics", 30],
     queryFn: () => api.get("/analytics/doorways-metrics", { params: { days: 30 } }).then((r) => r.data),
@@ -149,12 +154,19 @@ export default function Doorways() {
   );
 
   const generateMut = useMutation({
-    mutationFn: (d: typeof gen) => api.post("/doorways/generate", d).then((r) => r.data),
-    onSuccess: (data) => {
+    mutationFn: (d: typeof gen) => {
+      const payload: Record<string, unknown> = { ...d };
+      if (d.target_geos.length === 1) payload.target_geo = d.target_geos[0];
+      else if (d.target_geos.length > 1) payload.target_geos = d.target_geos;
+      delete (payload as { target_geos?: string[] }).target_geos;
+      return api.post("/doorways/generate", payload).then((r) => r.data);
+    },
+    onSuccess: (data: { doorway_id?: number; created_count?: number }) => {
       setResult(data);
       qc.invalidateQueries({ queryKey: ["doorways"] });
-      if (data.doorway_id) {
-        toast.success("Дорвей создан", { description: `ID: ${data.doorway_id}` });
+      const count = data.created_count ?? (data.doorway_id ? 1 : 0);
+      if (count > 0) {
+        toast.success(count > 1 ? `Создано дорвеев: ${count}` : "Дорвей создан", count > 1 ? undefined : { description: `ID: ${data.doorway_id}` });
         setWizardStep(2);
       }
     },
@@ -407,7 +419,12 @@ export default function Doorways() {
       keyword,
       path: gen.path === "/" ? `/${slug(keyword)}` : gen.path,
     }));
-    batchMut.mutate({ items, generate_faq: gen.generate_faq, generate_quiz: gen.generate_quiz });
+    batchMut.mutate({
+      items,
+      generate_faq: gen.generate_faq,
+      generate_quiz: gen.generate_quiz,
+      target_geos: gen.target_geos.length > 0 ? gen.target_geos : undefined,
+    });
   };
 
   return (
@@ -525,6 +542,38 @@ export default function Doorways() {
                   <Input value={gen.path} onChange={(e) => setGen((g) => ({ ...g, path: e.target.value || "/" }))} placeholder="/" />
                 </div>
               </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Страны (гео)</label>
+                <p className="text-slate-500 text-xs mb-2">Пусто — один дорвей (язык кампании). Выберите страны — по каждой создаётся отдельный дорвей с языком страны (path: /en/slug, /de/slug …).</p>
+                <div className="flex flex-wrap gap-2">
+                  {GEO_OPTIONS.map((code) => (
+                    <label key={code} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-slate-700/80 border border-slate-600 cursor-pointer hover:bg-slate-600/80">
+                      <input
+                        type="checkbox"
+                        checked={gen.target_geos.includes(code)}
+                        onChange={(e) => {
+                          setGen((g) => ({
+                            ...g,
+                            target_geos: e.target.checked ? [...g.target_geos, code] : g.target_geos.filter((c) => c !== code),
+                          }));
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-white">{code}</span>
+                    </label>
+                  ))}
+                </div>
+                {offerGeos?.geos?.length ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 text-slate-400"
+                    onClick={() => setGen((g) => ({ ...g, target_geos: [...new Set([...(offerGeos.geos || []), ...g.target_geos])] }))}
+                  >
+                    Подставить все гео офферов ({offerGeos.geos.join(", ")})
+                  </Button>
+                ) : null}
+              </div>
               <div className="p-4 bg-slate-900/50 rounded-lg">
                 <label className="block text-slate-400 text-sm mb-2">Пакетная генерация (по 1 ключу на строку, сортировка по объёму)</label>
                 <div className="flex gap-2 mb-2">
@@ -584,7 +633,7 @@ export default function Doorways() {
           {wizardStep === 2 && result?.html && (
             <div className="space-y-4">
               <p className="text-slate-400 text-sm">
-                {result.doorway_id ? `Создан дорвей #${result.doorway_id}` : "Превью"}
+                {result.doorway_id ? ((result as { created_count?: number }).created_count && (result as { created_count?: number }).created_count! > 1 ? `Создано дорвеев: ${(result as { created_count?: number }).created_count}` : `Создан дорвей #${result.doorway_id}`) : "Превью"}
               </p>
               <iframe srcDoc={result.html} title="Preview" className="w-full h-80 border border-slate-600 rounded-lg bg-white" sandbox="allow-same-origin" />
               {result.doorway_id && (

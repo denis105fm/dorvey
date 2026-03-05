@@ -151,7 +151,7 @@ def render_doorway_page(
     meta_description: str,
     content: str,
     *,
-    language: str = "ru",
+    language: str = "en",
     affiliate_url: Optional[str] = None,
     canonical_url: Optional[str] = None,
     template_html: Optional[str] = None,

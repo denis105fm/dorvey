@@ -574,6 +574,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         get_cta_preset,
         get_doorway_ui_strings,
     )
+    from app.services.dataforseo_service import get_language_code
     from app.services.anti_detection import get_schema_variant, _seed_from_url
     from app.services.seo_tools import get_internal_links_suggestions
 
@@ -597,14 +598,19 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     ) if schemas else ""
 
     seed = _seed_from_url(domain, path, dw.id)
-    trust_html = build_trust_elements_html(camp.language or "ru", seed=seed) if trust_elements else None
+    camp_lang = (
+        get_language_code(dw.target_geo) if getattr(dw, "target_geo", None) else (camp.language or "en")
+    )
+    ui = get_doorway_ui_strings(camp_lang)
+    trust_html = build_trust_elements_html(camp_lang, seed=seed) if trust_elements else None
 
     faq_schema = ""
     faq_block = None
     faq_qa = (dw.cloaking_rules or {}).get("faq_qa")
     if isinstance(faq_qa, list) and faq_qa:
         faq_schema = build_paa_schema(faq_qa)
-        parts_faq = ['<h2>Часто спрашивают</h2>']
+        faq_heading = ui.get("faq_heading", "Frequently asked questions")
+        parts_faq = [f'<h2>{html.escape(faq_heading)}</h2>']
         for qa in faq_qa[:10]:
             q = (qa.get("question") or "").strip()
             a = (qa.get("answer") or "").strip()
@@ -618,7 +624,8 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     internal_links = await get_internal_links_suggestions(db, doorway_id, camp.id, max_links=3)
     internal_links_block = None
     if internal_links:
-        parts_il = ['<h2>Ещё по теме</h2><ul class="internal-links-list">']
+        il_heading = ui.get("internal_links_heading", "Related topics")
+        parts_il = [f'<h2>{html.escape(il_heading)}</h2><ul class="internal-links-list">']
         for link in internal_links:
             url_esc = html.escape(link.get("url") or "")
             title_esc = html.escape(link.get("title") or link.get("anchor") or "")
@@ -636,8 +643,8 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         cta_desktop = cta_by_device.get("desktop")
         cta_mobile = cta_by_device.get("mobile")
     if (not cta_desktop and not cta_mobile) and not for_bot:
-        preset = get_cta_preset(camp.language or "ru", seed)
-        cta_desktop = preset.get("desktop") or "Узнать подробнее"
+        preset = get_cta_preset(camp_lang, seed)
+        cta_desktop = preset.get("desktop") or ui.get("default_cta", "Learn more")
         cta_mobile = preset.get("mobile") or cta_desktop
 
     urgency_block = None
@@ -647,7 +654,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     elif isinstance(u, str) and u.strip():
         urgency_block = u.strip()
     if not urgency_block and not for_bot:
-        urgency_block = get_urgency_preset(camp.language or "ru", seed)
+        urgency_block = get_urgency_preset(camp_lang, seed)
 
     exit_intent_title = None
     exit_intent_cta = None
@@ -656,7 +663,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         exit_intent_title = ei.get("title") or ei.get("text")
         exit_intent_cta = ei.get("cta_text") or ei.get("cta")
     if (not exit_intent_title and not exit_intent_cta) and not for_bot and exit_intent:
-        preset = get_exit_intent_preset(camp.language or "ru", seed)
+        preset = get_exit_intent_preset(camp_lang, seed)
         exit_intent_title = preset.get("title")
         exit_intent_cta = preset.get("cta")
 
@@ -683,7 +690,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     elif isinstance(sp, str) and sp.strip():
         social_proof_block = sp.strip()
     if not social_proof_block and not for_bot:
-        preset = get_social_proof_preset(camp.language or "ru", seed)
+        preset = get_social_proof_preset(camp_lang, seed)
         parts_sp = []
         if preset.get("stats"):
             parts_sp.append(f'<div class="social-proof-stats">{preset["stats"]}</div>')
@@ -697,16 +704,15 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     comparison_table = None
     camp_show_table = camp_settings.get("show_offers_table", False)
     offers_for_table = [o for o in offers if o.get("name") or o.get("rate") or o.get("amount") or o.get("term")]
-    ui_table = get_doorway_ui_strings(camp.language or "en")
     if not offers_for_table and offers:
-        offers_for_table = [dict(o, name=o.get("name") or f"{ui_table.get('option_label', 'Option')} {i+1}") for i, o in enumerate(offers[:5])]
+        offers_for_table = [dict(o, name=o.get("name") or f"{ui.get('option_label', 'Option')} {i+1}") for i, o in enumerate(offers[:5])]
     if camp_show_table and offers_for_table:
         n_h, r_h, a_h, t_h, apply_t = (
-            ui_table.get("table_name", "Name"),
-            ui_table.get("table_rate", "Rate"),
-            ui_table.get("table_amount", "Amount"),
-            ui_table.get("table_term", "Term"),
-            ui_table.get("table_apply", "Apply"),
+            ui.get("table_name", "Name"),
+            ui.get("table_rate", "Rate"),
+            ui.get("table_amount", "Amount"),
+            ui.get("table_term", "Term"),
+            ui.get("table_apply", "Apply"),
         )
         rows = []
         for o in offers_for_table[:5]:
@@ -728,9 +734,9 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         import json as _json
         questions = quiz_data["questions"]
         if isinstance(questions, list) and len(questions) >= 1:
-            q_title = html.escape(ui_table.get("quiz_title", "Подберите подходящий вариант"))
-            q_next = html.escape(ui_table.get("quiz_next", "Далее"))
-            q_submit = html.escape(ui_table.get("quiz_submit", "Перейти к предложению"))
+            q_title = html.escape(ui.get("quiz_title", "Find the right option for you"))
+            q_next = html.escape(ui.get("quiz_next", "Next"))
+            q_submit = html.escape(ui.get("quiz_submit", "Go to offer"))
             cta_esc = html.escape(cta_href or "")
             safe_questions = []
             for q in questions[:8]:
@@ -751,7 +757,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
         title=title,
         meta_description=desc,
         content=dw.content or "",
-        language=camp.language,
+        language=camp_lang,
         affiliate_url=cta_href,
         canonical_url=canonical,
         hotjar_site_id=None if for_bot else hotjar_id,

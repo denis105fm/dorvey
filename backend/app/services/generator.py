@@ -1,6 +1,7 @@
 """Doorway content generator: AI + templates + validation."""
 
 import datetime
+import re
 from typing import Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +14,16 @@ from app.models.offer import Offer
 from app.models.setting import Setting
 from app.services.openai_service import openai_service
 from app.services.settings_helpers import get_user_openai_key
+from app.services.dataforseo_service import get_language_code
 from app.services.affiliate_validator import get_forbidden_words, validate_content
 from app.services.template_engine import render_doorway_page
+
+
+def _keyword_to_slug(keyword: str, max_len: int = 80) -> str:
+    """Build URL slug from keyword. Used for path when generating by geo."""
+    s = (keyword or "").strip().lower().replace(" ", "-")
+    s = re.sub(r"[^a-z0-9\-]", "", s).strip("-")[:max_len].rstrip("-")
+    return s or "page"
 
 
 async def _load_external_settings(db: AsyncSession, user_id: int):
@@ -78,9 +87,11 @@ async def generate_doorway(
     path: str = "/",
     generate_faq: bool = False,
     generate_quiz: bool = False,
+    target_geo: Optional[str] = None,
 ) -> dict:
     """
     Generate doorway content via AI, validate, render HTML.
+    When target_geo is set, language is taken from country preset (e.g. DE -> de).
     Returns dict with title, meta_description, content, html.
     """
     camp = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
@@ -89,6 +100,9 @@ async def generate_doorway(
     dom = (await db.execute(select(Domain).where(Domain.id == domain_id))).scalar_one_or_none()
     if not dom:
         raise ValueError("Domain not found")
+
+    lang = get_language_code(target_geo) if target_geo else (camp.language or "en")
+    region_for_ai = (target_geo or camp.region or "").strip().upper() or None
 
     user_openai_key = await get_user_openai_key(db, camp.user_id)
     if not openai_service.is_available(user_openai_key):
@@ -101,7 +115,7 @@ async def generate_doorway(
             title=data["title"],
             meta_description=data["meta_description"],
             content=data["content"],
-            language=camp.language,
+            language=lang,
             affiliate_url=camp.affiliate_url,
             canonical_url=f"https://{dom.domain}",
         )
@@ -110,18 +124,16 @@ async def generate_doorway(
 
     forbidden = get_forbidden_words(camp.affiliate_rules)
     external_context: Optional[str] = None
-    # Подмешиваем внешние данные только если включены в настройках (сезонность/новости — короткая подсказка)
     enabled, news_key, gnews_key, mstack_key, guard_key, season_url = await _load_external_settings(db, camp.user_id)
-    if enabled:
-        country_code = (camp.region or "").strip().lower()[:2] if getattr(camp, "region", None) else ""
-        if not country_code:
-            off_r = await db.execute(
-                select(Offer.geo).where(Offer.campaign_id == camp.id, Offer.geo.isnot(None), Offer.geo != "").limit(1)
-            )
-            row = off_r.first()
-            if row and row[0]:
-                country_code = (row[0] or "").strip().lower()[:2]
-        if country_code:
+    country_code = (target_geo or camp.region or "").strip().lower()[:2] if (target_geo or getattr(camp, "region", None)) else ""
+    if enabled and not country_code:
+        off_r = await db.execute(
+            select(Offer.geo).where(Offer.campaign_id == camp.id, Offer.geo.isnot(None), Offer.geo != "").limit(1)
+        )
+        row = off_r.first()
+        if row and row[0]:
+            country_code = (row[0] or "").strip().lower()[:2]
+    if enabled and country_code:
             from app.services.external_data_service import get_external_signals
             try:
                 signals = await get_external_signals(
@@ -138,8 +150,8 @@ async def generate_doorway(
                 external_context = None
     data = await openai_service.generate_doorway_content(
         keyword=keyword,
-        language=camp.language,
-        region=camp.region,
+        language=lang,
+        region=region_for_ai or camp.region,
         affiliate_url=camp.affiliate_url,
         forbidden_words=forbidden or None,
         external_context=external_context,
@@ -156,7 +168,7 @@ async def generate_doorway(
     if generate_faq and openai_service.is_available(user_openai_key):
         faq_qa = await openai_service.generate_faq(
             keyword=keyword,
-            language=camp.language,
+            language=lang,
             max_items=8,
             api_key_override=user_openai_key,
         )
@@ -175,7 +187,7 @@ async def generate_doorway(
             offer_theme = (camp.name or "").strip()[:100]
         quiz_questions = await openai_service.generate_quiz(
             keyword=keyword,
-            language=camp.language,
+            language=lang,
             offer_theme=offer_theme,
             max_questions=5,
             api_key_override=user_openai_key,
@@ -188,7 +200,7 @@ async def generate_doorway(
         title=data.get("title", keyword),
         meta_description=data.get("meta_description", ""),
         content=data.get("content", ""),
-        language=camp.language,
+        language=lang,
         affiliate_url=camp.affiliate_url,
         canonical_url=canonical,
     )
@@ -232,7 +244,7 @@ async def generate_quiz_for_doorway(
         offer_theme = (camp.name or "").strip()[:100]
     quiz_questions = await openai_service.generate_quiz(
         keyword=keyword,
-        language=camp.language or "ru",
+        language=camp.language or "en",
         offer_theme=offer_theme,
         max_questions=5,
         api_key_override=user_openai_key,

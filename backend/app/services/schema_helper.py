@@ -167,26 +167,26 @@ CTA_BY_LANG.setdefault("pl", CTA_PRESETS_EN)
 
 
 def get_urgency_preset(lang: str, seed: int) -> str:
-    """Return urgency block text from presets. Deterministic by seed."""
-    variants = URGENCY_BY_LANG.get((lang or "ru").lower()[:2], URGENCY_PRESETS_RU)
+    """Return urgency block text from presets. Deterministic by seed. Default lang: en."""
+    variants = URGENCY_BY_LANG.get((lang or "en").lower()[:2], URGENCY_PRESETS_EN)
     return variants[seed % len(variants)]
 
 
 def get_social_proof_preset(lang: str, seed: int) -> dict:
-    """Return social_proof dict from presets."""
-    variants = SOCIAL_PROOF_BY_LANG.get((lang or "ru").lower()[:2], SOCIAL_PROOF_PRESETS_RU)
+    """Return social_proof dict from presets. Default lang: en."""
+    variants = SOCIAL_PROOF_BY_LANG.get((lang or "en").lower()[:2], SOCIAL_PROOF_PRESETS_EN)
     return variants[seed % len(variants)]
 
 
 def get_exit_intent_preset(lang: str, seed: int) -> dict:
-    """Return exit_intent dict from presets."""
-    variants = EXIT_INTENT_BY_LANG.get((lang or "ru").lower()[:2], EXIT_INTENT_PRESETS_RU)
+    """Return exit_intent dict from presets. Default lang: en."""
+    variants = EXIT_INTENT_BY_LANG.get((lang or "en").lower()[:2], EXIT_INTENT_PRESETS_EN)
     return variants[seed % len(variants)]
 
 
 def get_cta_preset(lang: str, seed: int) -> dict:
-    """Return cta_by_device dict from presets."""
-    variants = CTA_BY_LANG.get((lang or "ru").lower()[:2], CTA_PRESETS_RU)
+    """Return cta_by_device dict from presets. Default lang: en."""
+    variants = CTA_BY_LANG.get((lang or "en").lower()[:2], CTA_PRESETS_EN)
     return variants[seed % len(variants)]
 
 
@@ -223,6 +223,8 @@ DOORWAY_UI_RU = {
     "quiz_title": "Подберите подходящий вариант",
     "quiz_next": "Далее",
     "quiz_submit": "Перейти к предложению",
+    "faq_heading": "Часто спрашивают",
+    "internal_links_heading": "Ещё по теме",
 }
 DOORWAY_UI_EN = {
     "table_name": "Name",
@@ -256,6 +258,8 @@ DOORWAY_UI_EN = {
     "quiz_title": "Find the right option for you",
     "quiz_next": "Next",
     "quiz_submit": "Go to offer",
+    "faq_heading": "Frequently asked questions",
+    "internal_links_heading": "Related topics",
 }
 DOORWAY_UI_BY_LANG = {"ru": DOORWAY_UI_RU, "en": DOORWAY_UI_EN}
 for _k in ["de", "es", "pl", "fr", "pt"]:
@@ -268,9 +272,9 @@ def get_doorway_ui_strings(lang: str) -> dict:
     return DOORWAY_UI_BY_LANG.get(key, DOORWAY_UI_EN).copy()
 
 
-def build_trust_elements_html(lang: str = "ru", seed: Optional[int] = None) -> str:
-    """Trust badges HTML. Variants reduce structural fingerprint."""
-    lang_key = (lang or "ru").lower()[:2]
+def build_trust_elements_html(lang: str = "en", seed: Optional[int] = None) -> str:
+    """Trust badges HTML. Variants reduce structural fingerprint. Default lang: en."""
+    lang_key = (lang or "en").lower()[:2]
     variants = TRUST_BY_LANG.get(lang_key, TRUST_VARIANTS_EN)
     if seed is not None:
         return variants[seed % len(variants)]

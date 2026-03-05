@@ -106,7 +106,7 @@ async def apply_fixes_to_doorway(
         cr = dict(doorway.cloaking_rules or {})
         camp_settings = (campaign.affiliate_rules or {}).get("settings") or {}
         if not cr.get("urgency_block") and not camp_settings.get("urgency_block"):
-            preset = get_urgency_preset(campaign.language or "ru", doorway.id)
+            preset = get_urgency_preset(campaign.language or "en", doorway.id)
             if preset:
                 cr["urgency_block"] = {"text": preset}
         if not cr.get("social_proof"):
@@ -127,7 +127,7 @@ async def apply_fixes_to_doorway(
                 kw = keyword or (doorway.title or "").strip()[:50] or "topic"
                 faq_qa = await openai_service.generate_faq(
                     keyword=kw,
-                    language=campaign.language or "ru",
+                    language=campaign.language or "en",
                     max_items=6,
                     api_key_override=api_key,
                 )

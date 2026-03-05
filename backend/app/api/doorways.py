@@ -20,7 +20,8 @@ from app.schemas.doorway import (
     DoorwayBatchGenerateRequest,
     DoorwayBatchGenerateResponse,
 )
-from app.services.generator import generate_doorway
+from app.services.generator import generate_doorway, _keyword_to_slug
+from app.services.dataforseo_service import get_language_code
 
 router = APIRouter()
 
@@ -60,66 +61,96 @@ async def generate_doorway_content(
     ok = await _check_campaign_access(db, data.campaign_id, current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    try:
-        result = await generate_doorway(
-            db,
-            campaign_id=data.campaign_id,
-            domain_id=data.domain_id,
-            keyword=data.keyword,
-            path=data.path,
-            generate_faq=data.generate_faq,
-            generate_quiz=data.generate_quiz,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    doorway_id = None
-    if data.save and result:
-        cloaking = {}
-        if result.get("faq_qa"):
-            cloaking["faq_qa"] = result["faq_qa"]
-        if result.get("quiz_questions"):
-            cloaking["quiz"] = {"enabled": True, "questions": result["quiz_questions"]}
-        camp = (await db.execute(select(Campaign).where(Campaign.id == data.campaign_id))).scalar_one_or_none()
-        preferred_layout = None
-        if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
-            preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
-        dw = Doorway(
-            campaign_id=data.campaign_id,
-            domain_id=data.domain_id,
-            path=data.path,
-            title=result.get("title"),
-            content=result.get("content"),
-            meta_description=result.get("meta_description"),
-            status="draft",
-            cloaking_rules=cloaking if cloaking else None,
-            layout_index=preferred_layout if preferred_layout is not None else None,
-        )
-        db.add(dw)
-        await db.commit()
-        await db.refresh(dw)
-        doorway_id = dw.id
-        # Save version for rollback
-        snap = {
-            "title": dw.title,
-            "content": dw.content,
-            "meta_description": dw.meta_description,
-        }
-        ver = DoorwayVersion(doorway_id=dw.id, content_snapshot=snap)
-        db.add(ver)
-        await db.commit()
+
+    geos: list[str | None] = []
+    if data.target_geos and len(data.target_geos) > 1:
+        geos = [g.strip().upper()[:2] for g in data.target_geos if (g or "").strip()]
+    elif data.target_geos and len(data.target_geos) == 1 and (data.target_geos[0] or "").strip():
+        geos = [(data.target_geos[0] or "").strip().upper()[:2]]
+    elif data.target_geo and (data.target_geo or "").strip():
+        geos = [(data.target_geo or "").strip().upper()[:2]]
+    if not geos:
+        geos = [None]
+
+    base_path = (data.path or "/").strip() or "/"
+    slug = _keyword_to_slug(data.keyword) if base_path == "/" else base_path.strip("/").split("/")[0] or _keyword_to_slug(data.keyword)
+    created_ids: list[int] = []
+    last_result = None
+
+    for geo in geos:
+        if len(geos) > 1 and geo:
+            path_use = f"/{get_language_code(geo)}/{slug}"
+        else:
+            path_use = base_path if base_path != "/" else f"/{slug}"
         try:
-            from app.api.billing import notify_billing_limits_if_needed
-            await notify_billing_limits_if_needed(db, current_user.id)
-        except Exception:
-            pass
+            result = await generate_doorway(
+                db,
+                campaign_id=data.campaign_id,
+                domain_id=data.domain_id,
+                keyword=data.keyword,
+                path=path_use,
+                generate_faq=data.generate_faq,
+                generate_quiz=data.generate_quiz,
+                target_geo=geo,
+            )
+        except ValueError as e:
+            if not created_ids:
+                raise HTTPException(status_code=404, detail=str(e))
+            break
+        last_result = result
+        if data.save and result:
+            cloaking = {}
+            if result.get("faq_qa"):
+                cloaking["faq_qa"] = result["faq_qa"]
+            if result.get("quiz_questions"):
+                cloaking["quiz"] = {"enabled": True, "questions": result["quiz_questions"]}
+            camp = (await db.execute(select(Campaign).where(Campaign.id == data.campaign_id))).scalar_one_or_none()
+            preferred_layout = None
+            if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
+                preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
+            dw = Doorway(
+                campaign_id=data.campaign_id,
+                domain_id=data.domain_id,
+                path=path_use,
+                title=result.get("title"),
+                content=result.get("content"),
+                meta_description=result.get("meta_description"),
+                status="draft",
+                cloaking_rules=cloaking if cloaking else None,
+                layout_index=preferred_layout if preferred_layout is not None else None,
+                target_geo=geo,
+            )
+            db.add(dw)
+            await db.commit()
+            await db.refresh(dw)
+            created_ids.append(dw.id)
+            if len(created_ids) == 1:
+                snap = {"title": dw.title, "content": dw.content, "meta_description": dw.meta_description}
+                ver = DoorwayVersion(doorway_id=dw.id, content_snapshot=snap)
+                db.add(ver)
+                await db.commit()
+            else:
+                snap = {"title": dw.title, "content": dw.content, "meta_description": dw.meta_description}
+                db.add(DoorwayVersion(doorway_id=dw.id, content_snapshot=snap))
+                await db.commit()
+        if len(created_ids) == 1:
+            try:
+                from app.api.billing import notify_billing_limits_if_needed
+                await notify_billing_limits_if_needed(db, current_user.id)
+            except Exception:
+                pass
+
+    if not last_result:
+        raise HTTPException(status_code=404, detail="Campaign or domain not found")
     return DoorwayGenerateResponse(
-        title=result.get("title", ""),
-        meta_description=result.get("meta_description", ""),
-        content=result.get("content", ""),
-        html=result.get("html", ""),
-        doorway_id=doorway_id,
-        validation_violations=result.get("validation_violations"),
-        faq_qa=result.get("faq_qa"),
+        title=last_result.get("title", ""),
+        meta_description=last_result.get("meta_description", ""),
+        content=last_result.get("content", ""),
+        html=last_result.get("html", ""),
+        doorway_id=created_ids[0] if created_ids else None,
+        created_count=len(created_ids),
+        validation_violations=last_result.get("validation_violations"),
+        faq_qa=last_result.get("faq_qa"),
     )
 
 
@@ -133,57 +164,79 @@ async def generate_batch(
         raise HTTPException(status_code=400, detail="Добавьте ключи в поле пакетной генерации (по одному на строку).")
     results = []
     created = 0
-    for item in data.items[:50]:  # limit 50 per request
+    max_created = 100
+    for item in data.items[:50]:
+        if created >= max_created:
+            break
         ok = await _check_campaign_access(db, item.campaign_id, current_user.id)
         if not ok:
             results.append({"keyword": item.keyword, "status": "error", "error": "Campaign not found"})
             continue
-        try:
-            gen_result = await generate_doorway(
-                db,
-                campaign_id=item.campaign_id,
-                domain_id=item.domain_id,
-                keyword=item.keyword,
-                path=item.path,
-                generate_faq=data.generate_faq,
-                generate_quiz=data.generate_quiz,
-            )
-        except (ValueError, Exception) as e:
-            results.append({"keyword": item.keyword, "status": "error", "error": str(e)[:200]})
-            continue
-        doorway_id = None
-        try:
-            cloaking = {}
-            if gen_result.get("faq_qa"):
-                cloaking["faq_qa"] = gen_result["faq_qa"]
-            if gen_result.get("quiz_questions"):
-                cloaking["quiz"] = {"enabled": True, "questions": gen_result["quiz_questions"]}
-            camp = (await db.execute(select(Campaign).where(Campaign.id == item.campaign_id))).scalar_one_or_none()
-            preferred_layout = None
-            if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
-                preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
-            dw = Doorway(
-                campaign_id=item.campaign_id,
-                domain_id=item.domain_id,
-                path=item.path,
-                title=gen_result.get("title"),
-                content=gen_result.get("content"),
-                meta_description=gen_result.get("meta_description"),
-                status="draft",
-                cloaking_rules=cloaking if cloaking else None,
-                layout_index=preferred_layout if preferred_layout is not None else None,
-            )
-            db.add(dw)
-            await db.flush()
-            doorway_id = dw.id
-            ver = DoorwayVersion(doorway_id=dw.id, content_snapshot={
-                "title": dw.title, "content": dw.content, "meta_description": dw.meta_description,
-            })
-            db.add(ver)
-            created += 1
-            results.append({"keyword": item.keyword, "status": "ok", "doorway_id": doorway_id})
-        except Exception as ex:
-            results.append({"keyword": item.keyword, "status": "error", "error": str(ex)})
+        geos: list[str | None] = []
+        if (data.target_geos or item.target_geos) and len(data.target_geos or item.target_geos or []) > 0:
+            gs = data.target_geos or item.target_geos or []
+            geos = [g.strip().upper()[:2] for g in gs if (g or "").strip()]
+        elif (item.target_geo or "").strip():
+            geos = [(item.target_geo or "").strip().upper()[:2]]
+        if not geos:
+            geos = [None]
+        base_path = (item.path or "/").strip() or "/"
+        slug = _keyword_to_slug(item.keyword) if base_path == "/" else (base_path.strip("/").split("/")[0] or _keyword_to_slug(item.keyword))
+        item_created = 0
+        for geo in geos:
+            if created >= max_created:
+                break
+            if len(geos) > 1 and geo:
+                path_use = f"/{get_language_code(geo)}/{slug}"
+            else:
+                path_use = base_path if base_path != "/" else f"/{slug}"
+            try:
+                gen_result = await generate_doorway(
+                    db,
+                    campaign_id=item.campaign_id,
+                    domain_id=item.domain_id,
+                    keyword=item.keyword,
+                    path=path_use,
+                    generate_faq=data.generate_faq,
+                    generate_quiz=data.generate_quiz,
+                    target_geo=geo,
+                )
+            except (ValueError, Exception) as e:
+                results.append({"keyword": item.keyword, "geo": geo or "-", "status": "error", "error": str(e)[:200]})
+                continue
+            try:
+                cloaking = {}
+                if gen_result.get("faq_qa"):
+                    cloaking["faq_qa"] = gen_result["faq_qa"]
+                if gen_result.get("quiz_questions"):
+                    cloaking["quiz"] = {"enabled": True, "questions": gen_result["quiz_questions"]}
+                camp = (await db.execute(select(Campaign).where(Campaign.id == item.campaign_id))).scalar_one_or_none()
+                preferred_layout = None
+                if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
+                    preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
+                dw = Doorway(
+                    campaign_id=item.campaign_id,
+                    domain_id=item.domain_id,
+                    path=path_use,
+                    title=gen_result.get("title"),
+                    content=gen_result.get("content"),
+                    meta_description=gen_result.get("meta_description"),
+                    status="draft",
+                    cloaking_rules=cloaking if cloaking else None,
+                    layout_index=preferred_layout if preferred_layout is not None else None,
+                    target_geo=geo,
+                )
+                db.add(dw)
+                await db.flush()
+                created += 1
+                item_created += 1
+                ver = DoorwayVersion(doorway_id=dw.id, content_snapshot={
+                    "title": dw.title, "content": dw.content, "meta_description": dw.meta_description,
+                })
+                db.add(ver)
+                results.append({"keyword": item.keyword, "geo": geo or "-", "status": "ok", "doorway_id": dw.id})
+            except Exception as ex:
+                results.append({"keyword": item.keyword, "geo": geo or "-", "status": "error", "error": str(ex)})
     await db.commit()
     if created > 0:
         try:
