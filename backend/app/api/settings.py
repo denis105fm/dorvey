@@ -721,6 +721,27 @@ async def set_integrations(
     db: AsyncSession = Depends(get_db),
 ):
     d = data.model_dump(exclude_none=True)
+    # Защита от перезаписи OpenAI ключа обрезанным значением (баг/автозаполнение)
+    existing_r = await db.execute(
+        select(Setting).where(
+            Setting.user_id == current_user.id,
+            Setting.key == "openai_api_key",
+        )
+    )
+    existing_openai = existing_r.scalar_one_or_none()
+    new_openai = (d.get("openai_api_key") or "").strip()
+    openai_skipped = False
+    if (
+        existing_openai
+        and existing_openai.value
+        and len(existing_openai.value) > 40
+        and new_openai
+        and new_openai.startswith("sk-")
+        and len(new_openai) < 40
+    ):
+        # Не перезаписывать длинный ключ коротким (похоже на обрезку)
+        d.pop("openai_api_key", None)
+        openai_skipped = True
     for key, val in d.items():
         if key not in INTEGRATION_KEYS:
             continue
@@ -737,7 +758,7 @@ async def set_integrations(
         else:
             db.add(Setting(user_id=current_user.id, key=key, value=v))
     await db.commit()
-    return {"status": "ok"}
+    return {"status": "ok", "openai_key_skipped": openai_skipped}
 
 
 class WhiteLabelSettings(BaseModel):

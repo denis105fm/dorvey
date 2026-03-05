@@ -50,6 +50,24 @@ type IntegrationsData = {
   google_ads_manager_customer_id?: string | null;
 };
 
+/** Секретные поля интеграций: не отправляем при сохранении, если пользователь их не редактировал (защита от перезаписи автозаполнением/маской). */
+const SENSITIVE_INTEGRATION_KEYS = new Set([
+  "openai_api_key",
+  "telegram_bot_token", "telegram_chat_id",
+  "gsc_client_id", "gsc_client_secret", "gsc_refresh_token",
+  "bing_api_key",
+  "news_api_key", "gnews_api_key", "mediastack_api_key", "guardian_api_key",
+  "dataforseo_login", "dataforseo_password",
+  "fetchserp_api_key",
+  "google_ads_developer_token", "google_ads_client_id", "google_ads_client_secret",
+  "google_ads_refresh_token", "google_ads_customer_id", "google_ads_manager_customer_id",
+  "voluum_api_key", "voluum_api_url", "binom_api_key", "binom_api_url",
+  "slack_webhook_url",
+  "vapid_private_key", "vapid_public_key",
+  "hotjar_site_id", "clarity_project_id",
+  "facebook_pixel_id", "google_ads_id",
+]);
+
 const WEBHOOK_EVENT_OPTIONS: { value: string; label: string }[] = [
   { value: "doorway.deployed", label: "Деплой дорвея" },
   { value: "doorway.conversion", label: "Конверсия" },
@@ -97,6 +115,11 @@ export default function Settings() {
   const [showGoogleAdsRefresh, setShowGoogleAdsRefresh] = useState(false);
   const googleAdsPopupRef = useRef<Window | null>(null);
   const [googleAdsRedirectUri, setGoogleAdsRedirectUri] = useState<string | null>(null);
+  /** Какие секретные поля пользователь редактировал — при сохранении не отправляем нередактированные (защита от перезаписи). */
+  const editedSensitiveRef = useRef<Set<string>>(new Set());
+  const markSensitiveEdited = (key: keyof IntegrationsData) => {
+    editedSensitiveRef.current = new Set(editedSensitiveRef.current).add(key as string);
+  };
   const { data: integrationsData } = useQuery({
     queryKey: ["settings", "integrations"],
     queryFn: () => api.get<IntegrationsData>("/settings/integrations/all").then((r) => r.data),
@@ -106,7 +129,10 @@ export default function Settings() {
     queryFn: () => api.get("/settings/whitelabel").then((r) => r.data),
   });
   useEffect(() => {
-    if (integrationsData) setIntegrations(integrationsData);
+    if (integrationsData) {
+      setIntegrations(integrationsData);
+      editedSensitiveRef.current = new Set();
+    }
   }, [integrationsData]);
   useEffect(() => {
     if (whitelabelData) setWhitelabel(whitelabelData);
@@ -141,9 +167,20 @@ export default function Settings() {
   }, [qc]);
 
   const saveIntegrationsMut = useMutation({
-    mutationFn: (d: IntegrationsData) =>
-      api.put("/settings/integrations/all", d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["settings", "integrations"] }); toast.success("Интеграции сохранены"); },
+    mutationFn: (d: IntegrationsData) => {
+      const payload = { ...d };
+      SENSITIVE_INTEGRATION_KEYS.forEach((key) => {
+        if (!editedSensitiveRef.current.has(key)) delete payload[key as keyof IntegrationsData];
+      });
+      return api.put("/settings/integrations/all", payload).then((r) => r.data);
+    },
+    onSuccess: (data: { openai_key_skipped?: boolean }) => {
+      qc.invalidateQueries({ queryKey: ["settings", "integrations"] });
+      toast.success("Интеграции сохранены");
+      if (data?.openai_key_skipped) {
+        toast.warning("Ключ OpenAI не изменён: в поле было короткое значение (возможная обрезка). Вставьте ключ целиком заново и сохраните.");
+      }
+    },
   });
   const saveWhitelabelMut = useMutation({
     mutationFn: (d: typeof whitelabel) => api.put("/settings/whitelabel", d).then((r) => r.data),
@@ -264,6 +301,7 @@ export default function Settings() {
               value={integrations.openai_api_key ?? ""}
               onChange={(e) => {
                 setIntegrations((p) => ({ ...p, openai_api_key: e.target.value }));
+                markSensitiveEdited("openai_api_key");
                 setOpenaiTestStatus(null);
               }}
               placeholder="sk-..."
@@ -426,7 +464,7 @@ export default function Settings() {
               <div className="flex gap-2">
                 <input
                   value={integrations.news_api_key ?? ""}
-                  onChange={(e) => setIntegrations((p) => ({ ...p, news_api_key: e.target.value }))}
+                  onChange={(e) => { setIntegrations((p) => ({ ...p, news_api_key: e.target.value })); markSensitiveEdited("news_api_key"); }}
                   placeholder="Ключ с newsapi.org (новости по странам)"
                   className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                 />
@@ -449,7 +487,7 @@ export default function Settings() {
                 <div className="flex gap-2">
                   <input
                     value={integrations.gnews_api_key ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, gnews_api_key: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, gnews_api_key: e.target.value })); markSensitiveEdited("gnews_api_key"); }}
                     placeholder="gnews.io"
                     className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -470,7 +508,7 @@ export default function Settings() {
                 <div className="flex gap-2">
                   <input
                     value={integrations.mediastack_api_key ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, mediastack_api_key: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, mediastack_api_key: e.target.value })); markSensitiveEdited("mediastack_api_key"); }}
                     placeholder="mediastack.com"
                     className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -491,7 +529,7 @@ export default function Settings() {
                 <div className="flex gap-2">
                   <input
                     value={integrations.guardian_api_key ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, guardian_api_key: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, guardian_api_key: e.target.value })); markSensitiveEdited("guardian_api_key"); }}
                     placeholder="theguardian.com/open-platform"
                     className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -534,7 +572,7 @@ export default function Settings() {
                   <p className="text-slate-500 text-xs mb-1">Вход/регистрация: <a href="https://app.dataforseo.com/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">app.dataforseo.com</a></p>
                   <input
                     value={integrations.dataforseo_login ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_login: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, dataforseo_login: e.target.value })); markSensitiveEdited("dataforseo_login"); }}
                     placeholder="Логин с app.dataforseo.com"
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -544,7 +582,7 @@ export default function Settings() {
                   <input
                     type="password"
                     value={integrations.dataforseo_password ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, dataforseo_password: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, dataforseo_password: e.target.value })); markSensitiveEdited("dataforseo_password"); }}
                     placeholder="Пароль API"
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -561,6 +599,7 @@ export default function Settings() {
                     value={integrations.fetchserp_api_key ?? ""}
                     onChange={(e) => {
                       setIntegrations((p) => ({ ...p, fetchserp_api_key: e.target.value }));
+                      markSensitiveEdited("fetchserp_api_key");
                       setFetchserpTestStatus(null);
                     }}
                     placeholder="Ключ с fetchserp.com/app"
@@ -623,7 +662,7 @@ export default function Settings() {
                     <input
                       type={showGoogleAdsDevToken ? "text" : "password"}
                       value={integrations.google_ads_developer_token ?? ""}
-                      onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_developer_token: e.target.value }))}
+                      onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_developer_token: e.target.value })); markSensitiveEdited("google_ads_developer_token"); }}
                       placeholder="Из Google Ads API Center"
                       className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                     />
@@ -637,7 +676,7 @@ export default function Settings() {
                   <p className="text-slate-500 text-xs mb-1">Где взять: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">Google Cloud Console → APIs &amp; Services → Credentials</a>. Создайте OAuth 2.0 Client (тип Desktop или Web). Client ID — строка вида <code className="bg-slate-700 px-1 rounded">xxx.apps.googleusercontent.com</code>.</p>
                   <input
                     value={integrations.google_ads_client_id ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_client_id: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_client_id: e.target.value })); markSensitiveEdited("google_ads_client_id"); }}
                     placeholder="xxx.apps.googleusercontent.com"
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -648,7 +687,7 @@ export default function Settings() {
                     <input
                       type={showGoogleAdsSecret ? "text" : "password"}
                       value={integrations.google_ads_client_secret ?? ""}
-                      onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_client_secret: e.target.value }))}
+                      onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_client_secret: e.target.value })); markSensitiveEdited("google_ads_client_secret"); }}
                       placeholder="GOCSPX-..."
                       className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                     />
@@ -665,7 +704,7 @@ export default function Settings() {
                       <input
                         type={showGoogleAdsRefresh ? "text" : "password"}
                         value={integrations.google_ads_refresh_token ?? ""}
-                        onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_refresh_token: e.target.value })); setGoogleAdsTestStatus(null); }}
+                        onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_refresh_token: e.target.value })); setGoogleAdsTestStatus(null); markSensitiveEdited("google_ads_refresh_token"); }}
                         placeholder="1//..."
                         className="w-full px-3 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                       />
@@ -715,7 +754,7 @@ export default function Settings() {
                   <input
                     type="text"
                     value={integrations.google_ads_customer_id ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_customer_id: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_customer_id: e.target.value })); markSensitiveEdited("google_ads_customer_id"); }}
                     placeholder="123-456-7890"
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -726,7 +765,7 @@ export default function Settings() {
                   <input
                     type="text"
                     value={integrations.google_ads_manager_customer_id ?? ""}
-                    onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_manager_customer_id: e.target.value }))}
+                    onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_manager_customer_id: e.target.value })); markSensitiveEdited("google_ads_manager_customer_id"); }}
                     placeholder="185-780-6498 (MCC)"
                     className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
                   />
@@ -746,6 +785,7 @@ export default function Settings() {
                           { manager_customer_id: (integrations.google_ads_manager_customer_id ?? integrations.google_ads_customer_id ?? "").trim() || undefined }
                         );
                         setIntegrations((p) => ({ ...p, google_ads_customer_id: data.customer_id_formatted }));
+                        markSensitiveEdited("google_ads_customer_id");
                         toast.success(`Создан тестовый аккаунт: ${data.customer_id_formatted}. Подставлен в Customer ID.`);
                       } catch (e: unknown) {
                         const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Ошибка создания тестового аккаунта";
@@ -833,20 +873,20 @@ export default function Settings() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <input
                 value={integrations.telegram_bot_token ?? ""}
-                onChange={(e) => setIntegrations((p) => ({ ...p, telegram_bot_token: e.target.value }))}
+                onChange={(e) => { setIntegrations((p) => ({ ...p, telegram_bot_token: e.target.value })); markSensitiveEdited("telegram_bot_token"); }}
                 placeholder="Telegram Bot Token"
                 className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
               <input
                 value={integrations.telegram_chat_id ?? ""}
-                onChange={(e) => setIntegrations((p) => ({ ...p, telegram_chat_id: e.target.value }))}
+                onChange={(e) => { setIntegrations((p) => ({ ...p, telegram_chat_id: e.target.value })); markSensitiveEdited("telegram_chat_id"); }}
                 placeholder="Telegram Chat ID"
                 className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
             </div>
             <input
               value={integrations.slack_webhook_url ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, slack_webhook_url: e.target.value }))}
+              onChange={(e) => { setIntegrations((p) => ({ ...p, slack_webhook_url: e.target.value })); markSensitiveEdited("slack_webhook_url"); }}
               placeholder="Slack Incoming Webhook URL (https://hooks.slack.com/...)"
               className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
@@ -876,13 +916,13 @@ export default function Settings() {
           <div className="space-y-4 mb-4">
             <input
               value={integrations.gsc_client_id ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, gsc_client_id: e.target.value }))}
+              onChange={(e) => { setIntegrations((p) => ({ ...p, gsc_client_id: e.target.value })); markSensitiveEdited("gsc_client_id"); }}
               placeholder="Client ID"
               className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
             <input
               value={integrations.gsc_client_secret ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, gsc_client_secret: e.target.value }))}
+              onChange={(e) => { setIntegrations((p) => ({ ...p, gsc_client_secret: e.target.value })); markSensitiveEdited("gsc_client_secret"); }}
               placeholder="Client Secret"
               type="password"
               className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
@@ -890,7 +930,7 @@ export default function Settings() {
             <div className="flex gap-2 items-center">
               <input
                 value={integrations.gsc_refresh_token ?? ""}
-                onChange={(e) => setIntegrations((p) => ({ ...p, gsc_refresh_token: e.target.value }))}
+                onChange={(e) => { setIntegrations((p) => ({ ...p, gsc_refresh_token: e.target.value })); markSensitiveEdited("gsc_refresh_token"); }}
                 placeholder="Refresh Token"
                 className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
@@ -934,6 +974,7 @@ export default function Settings() {
               value={integrations.bing_api_key ?? ""}
               onChange={(e) => {
                 setIntegrations((p) => ({ ...p, bing_api_key: e.target.value }));
+                markSensitiveEdited("bing_api_key");
                 setBingTestStatus(null);
               }}
               placeholder="API Key"
@@ -1008,25 +1049,25 @@ export default function Settings() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <input
               value={integrations.voluum_api_key ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, voluum_api_key: e.target.value }))}
+              onChange={(e) => { setIntegrations((p) => ({ ...p, voluum_api_key: e.target.value })); markSensitiveEdited("voluum_api_key"); }}
               placeholder="Voluum API Key"
               className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
             <input
               value={integrations.voluum_api_url ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, voluum_api_url: e.target.value }))}
+              onChange={(e) => { setIntegrations((p) => ({ ...p, voluum_api_url: e.target.value })); markSensitiveEdited("voluum_api_url"); }}
               placeholder="Voluum API URL"
               className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
             <input
               value={integrations.binom_api_key ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, binom_api_key: e.target.value }))}
+              onChange={(e) => { setIntegrations((p) => ({ ...p, binom_api_key: e.target.value })); markSensitiveEdited("binom_api_key"); }}
               placeholder="Binom API Key"
               className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
             <input
               value={integrations.binom_api_url ?? ""}
-              onChange={(e) => setIntegrations((p) => ({ ...p, binom_api_url: e.target.value }))}
+              onChange={(e) => { setIntegrations((p) => ({ ...p, binom_api_url: e.target.value })); markSensitiveEdited("binom_api_url"); }}
               placeholder="Binom API URL"
               className="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
@@ -1051,6 +1092,7 @@ export default function Settings() {
                 value={integrations.hotjar_site_id ?? ""}
                 onChange={(e) => {
                   setIntegrations((p) => ({ ...p, hotjar_site_id: e.target.value }));
+                  markSensitiveEdited("hotjar_site_id");
                   setHotjarTestStatus(null);
                 }}
                 placeholder="Hotjar или Contentsquare ID (число или 785bcc77e264f)"
@@ -1090,6 +1132,7 @@ export default function Settings() {
                 value={integrations.clarity_project_id ?? ""}
                 onChange={(e) => {
                   setIntegrations((p) => ({ ...p, clarity_project_id: e.target.value }));
+                  markSensitiveEdited("clarity_project_id");
                   setClarityTestStatus(null);
                 }}
                 placeholder="Microsoft Clarity Project ID"
@@ -1219,7 +1262,7 @@ export default function Settings() {
               <label className="block text-slate-400 text-sm mb-1">Facebook Pixel ID</label>
               <input
                 value={integrations.facebook_pixel_id ?? ""}
-                onChange={(e) => setIntegrations((p) => ({ ...p, facebook_pixel_id: e.target.value }))}
+                onChange={(e) => { setIntegrations((p) => ({ ...p, facebook_pixel_id: e.target.value })); markSensitiveEdited("facebook_pixel_id"); }}
                 placeholder="123456789012345"
                 className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
@@ -1228,7 +1271,7 @@ export default function Settings() {
               <label className="block text-slate-400 text-sm mb-1">Google Ads ID</label>
               <input
                 value={integrations.google_ads_id ?? ""}
-                onChange={(e) => setIntegrations((p) => ({ ...p, google_ads_id: e.target.value }))}
+                onChange={(e) => { setIntegrations((p) => ({ ...p, google_ads_id: e.target.value })); markSensitiveEdited("google_ads_id"); }}
                 placeholder="AW-123456789"
                 className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
               />
