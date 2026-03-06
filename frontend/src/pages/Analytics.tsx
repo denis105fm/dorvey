@@ -15,6 +15,7 @@ import {
   Legend,
   CartesianGrid,
 } from "recharts";
+import { getAffiliateNetworkUrl } from "../utils/affiliateNetworks";
 
 type DailyPoint = {
   date: string;
@@ -328,12 +329,22 @@ export default function Analytics() {
         </div>
         {affRecMut.data?.recommendations?.length > 0 && (
           <ul className="space-y-2 mt-2">
-            {affRecMut.data.recommendations.map((r: { network: string; name?: string; why: string }, i: number) => (
-              <li key={i} className="p-3 bg-slate-700/50 rounded-lg text-sm">
-                <span className="text-emerald-400 font-medium">{r.name || r.network}</span>
-                <span className="text-slate-400 ml-2">— {r.why}</span>
-              </li>
-            ))}
+            {affRecMut.data.recommendations.map((r: { network: string; name?: string; why: string }, i: number) => {
+              const url = getAffiliateNetworkUrl(r.network);
+              const title = r.name || r.network;
+              return (
+                <li key={i} className="p-3 bg-slate-700/50 rounded-lg text-sm">
+                  {url ? (
+                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-emerald-400 font-medium hover:underline">
+                      {title}
+                    </a>
+                  ) : (
+                    <span className="text-emerald-400 font-medium">{title}</span>
+                  )}
+                  <span className="text-slate-400 ml-2">— {r.why}</span>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

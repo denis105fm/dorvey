@@ -35,10 +35,14 @@ async def generate_sitemap_xml(db: AsyncSession, domain_id: int) -> Optional[str
     )
     rows = r2.all()
     base = f"https://{dom.domain}".rstrip("/")
+    seen = set()
     urls = []
     for path, deployed_at, created_at in rows:
         path = path or "/"
         url = base if path == "/" else f"{base}{path}" if path.startswith("/") else f"{base}/{path}"
+        if url in seen:
+            continue
+        seen.add(url)
         lastmod = (deployed_at or created_at)
         lastmod_str = lastmod.strftime("%Y-%m-%d") if lastmod else ""
         if lastmod_str:

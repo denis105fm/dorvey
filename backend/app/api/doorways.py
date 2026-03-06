@@ -223,6 +223,23 @@ async def generate_batch_dismiss(task_id: str, current_user: CurrentUser):
     return {"status": "ok"}
 
 
+    return {"status": "ok"}
+
+
+@router.get("/active-batch-tasks")
+async def active_batch_tasks(current_user: CurrentUser):
+    """Return active batch task ids for this user (deploy, generate, delete) so any device/tab can show progress."""
+    import asyncio
+    from app.services.batch_deploy_state import get_user_task_ids as get_deploy_ids
+    from app.services.generate_batch_state import get_user_task_ids as get_generate_ids
+    from app.services.delete_batch_state import get_user_task_ids as get_delete_ids
+    uid = current_user.id
+    deploy = await asyncio.to_thread(get_deploy_ids, uid)
+    generate = await asyncio.to_thread(get_generate_ids, uid)
+    delete = await asyncio.to_thread(get_delete_ids, uid)
+    return {"deploy": deploy or [], "generate": generate or [], "delete": delete or []}
+
+
 @router.post("/", response_model=DoorwayResponse)
 async def create_doorway(
     data: DoorwayCreate,
@@ -583,20 +600,6 @@ async def batch_delete_dismiss(task_id: str, current_user: CurrentUser):
     from app.services.delete_batch_state import remove_user_task
     await asyncio.to_thread(remove_user_task, current_user.id, task_id)
     return {"status": "ok"}
-
-
-@router.get("/active-batch-tasks")
-async def active_batch_tasks(current_user: CurrentUser):
-    """Return active batch task ids for this user (deploy, generate, delete) so any device/tab can show progress."""
-    import asyncio
-    from app.services.batch_deploy_state import get_user_task_ids as get_deploy_ids
-    from app.services.generate_batch_state import get_user_task_ids as get_generate_ids
-    from app.services.delete_batch_state import get_user_task_ids as get_delete_ids
-    uid = current_user.id
-    deploy = await asyncio.to_thread(get_deploy_ids, uid)
-    generate = await asyncio.to_thread(get_generate_ids, uid)
-    delete = await asyncio.to_thread(get_delete_ids, uid)
-    return {"deploy": deploy or [], "generate": generate or [], "delete": delete or []}
 
 
 class BatchQualityCheckRequest(BaseModel):

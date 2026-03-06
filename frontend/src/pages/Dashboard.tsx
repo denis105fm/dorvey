@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Skeleton } from "../components/ui/skeleton";
 import { FolderOpen, FileText, Server, Globe, TrendingUp, MousePointer, DollarSign, Plus, Zap, Sparkles, BarChart3 } from "lucide-react";
+import { getAffiliateNetworkUrl } from "../utils/affiliateNetworks";
 
 const CARD_COLORS: Record<string, string> = {
   emerald: "text-emerald-400",
@@ -214,15 +215,27 @@ export default function Dashboard() {
               Ниша «{affRecMut.data.keyword}» — рекомендуемые партнёрки:
             </p>
             <ul className="space-y-2">
-              {affRecMut.data.recommendations.map((r: { network: string; name?: string; why: string; priority: number }, i: number) => (
-                <li key={i} className="flex gap-3 p-3 bg-slate-700/50 rounded-lg border border-slate-600/50">
-                  <span className="text-emerald-400 font-medium shrink-0">#{i + 1}</span>
-                  <div>
-                    <p className="text-white font-medium">{r.name || r.network}</p>
-                    <p className="text-slate-400 text-xs mt-0.5">{r.why}</p>
-                  </div>
-                </li>
-              ))}
+              {affRecMut.data.recommendations.map((r: { network: string; name?: string; why: string; priority: number }, i: number) => {
+                const url = getAffiliateNetworkUrl(r.network);
+                const title = r.name || r.network;
+                return (
+                  <li key={i} className="flex gap-3 p-3 bg-slate-700/50 rounded-lg border border-slate-600/50">
+                    <span className="text-emerald-400 font-medium shrink-0">#{i + 1}</span>
+                    <div className="min-w-0">
+                      <p className="text-white font-medium">
+                        {url ? (
+                          <a href={url} target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">
+                            {title}
+                          </a>
+                        ) : (
+                          title
+                        )}
+                      </p>
+                      <p className="text-slate-400 text-xs mt-0.5">{r.why}</p>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
