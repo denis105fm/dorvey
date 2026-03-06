@@ -331,8 +331,16 @@ async def deploy_batch(
         min_delay_sec=body.min_delay_sec,
         max_delay_sec=body.max_delay_sec,
     )
-    from app.services.batch_deploy_state import set_state
-    set_state(task.id, {"user_id": current_user.id})
+    from app.services.batch_deploy_state import set_state, add_user_task
+    set_state(task.id, {
+        "user_id": current_user.id,
+        "doorway_ids": ids,
+        "status": "queued",
+        "total": len(ids),
+        "current_index": 0,
+        "results": [{"doorway_id": i, "status": "pending", "message": None} for i in ids],
+    })
+    add_user_task(current_user.id, task.id)
     return {"status": "queued", "task_id": task.id, "doorway_ids": ids}
 
 

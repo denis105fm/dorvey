@@ -167,7 +167,7 @@ async def generate_batch(
     if not (data.items and len(data.items) > 0):
         raise HTTPException(status_code=400, detail="Добавьте ключи в поле пакетной генерации (по одному на строку).")
     from app.tasks.doorway_tasks import generate_batch_async
-    from app.services.generate_batch_state import set_state
+    from app.services.generate_batch_state import set_state, add_user_task
 
     items_payload = [
         {
@@ -188,6 +188,7 @@ async def generate_batch(
         target_geos=data.target_geos,
     )
     set_state(task.id, {"user_id": current_user.id})
+    add_user_task(current_user.id, task.id)
     return {"status": "queued", "task_id": task.id}
 
 
@@ -536,10 +537,11 @@ async def batch_delete_doorways(
     if not ids:
         return {"deleted": 0, "message": "Нет доступных дорвеев для удаления"}
     from app.tasks.doorway_tasks import delete_batch_async
-    from app.services.delete_batch_state import set_state
+    from app.services.delete_batch_state import set_state, add_user_task
 
     task = delete_batch_async.delay(user_id=current_user.id, doorway_ids=ids)
     set_state(task.id, {"user_id": current_user.id})
+    add_user_task(current_user.id, task.id)
     return {"status": "queued", "task_id": task.id, "doorway_ids": ids}
 
 
@@ -563,6 +565,20 @@ async def batch_delete_status(
         "error": state.get("error"),
         "results": state.get("results") or [],
     }
+
+
+@router.get("/active-batch-tasks")
+async def active_batch_tasks(current_user: CurrentUser):
+    """Return active batch task ids for this user (deploy, generate, delete) so any device/tab can show progress."""
+    import asyncio
+    from app.services.batch_deploy_state import get_user_task_ids as get_deploy_ids
+    from app.services.generate_batch_state import get_user_task_ids as get_generate_ids
+    from app.services.delete_batch_state import get_user_task_ids as get_delete_ids
+    uid = current_user.id
+    deploy = await asyncio.to_thread(get_deploy_ids, uid)
+    generate = await asyncio.to_thread(get_generate_ids, uid)
+    delete = await asyncio.to_thread(get_delete_ids, uid)
+    return {"deploy": deploy or [], "generate": generate or [], "delete": delete or []}
 
 
 class BatchQualityCheckRequest(BaseModel):

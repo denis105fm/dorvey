@@ -1,11 +1,12 @@
 """Redis state for batch generate: progress (read-only for user, no pause/cancel)."""
 
 import json
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from app.core.config import settings
 
 REDIS_KEY_PREFIX = "generate_batch:"
+USER_TASKS_KEY = "user_generate_tasks:"
 TTL_SEC = 86400 * 2  # 48 hours
 
 
@@ -42,3 +43,29 @@ def update_state(task_id: str, **kwargs: Any) -> None:
     s = get_state(task_id) or {}
     s.update(kwargs)
     set_state(task_id, s)
+
+
+def add_user_task(user_id: int, task_id: str) -> None:
+    try:
+        r = _redis_client()
+        key = USER_TASKS_KEY + str(user_id)
+        r.sadd(key, task_id)
+        r.expire(key, TTL_SEC)
+    except Exception:
+        pass
+
+
+def remove_user_task(user_id: int, task_id: str) -> None:
+    try:
+        r = _redis_client()
+        r.srem(USER_TASKS_KEY + str(user_id), task_id)
+    except Exception:
+        pass
+
+
+def get_user_task_ids(user_id: int) -> List[str]:
+    try:
+        r = _redis_client()
+        return list(r.smembers(USER_TASKS_KEY + str(user_id)) or [])
+    except Exception:
+        return []

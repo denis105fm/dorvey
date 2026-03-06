@@ -165,7 +165,7 @@ def deploy_batch_with_stagger(
     Progress/pause/cancel stored in Redis under deploy_batch:{task_id}.
     """
     from app.services.anti_detection import StaggerConfig, sleep_for_stagger
-    from app.services.batch_deploy_state import get_state, set_state, update_state
+    from app.services.batch_deploy_state import get_state, set_state, update_state, remove_user_task
     import time
 
     task_id = self.request.id
@@ -338,6 +338,7 @@ def deploy_batch_with_stagger(
                 results[i]["message"] = msg
                 results_out.append({"doorway_id": dw_id, "ok": True, "msg": msg})
                 update_state(task_id, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
+                await db.commit()
                 url = await get_doorway_url(db, dw_id)
                 if url and camp:
                     cred_r = await db.execute(
@@ -366,6 +367,9 @@ def deploy_batch_with_stagger(
             await db.commit()
         final_status = "cancelled" if get_state(task_id) and get_state(task_id).get("status") == "cancelled" else "completed"
         update_state(task_id, status=final_status, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
+        user_id = (get_state(task_id) or {}).get("user_id")
+        if user_id is not None:
+            remove_user_task(user_id, task_id)
         return {"status": "ok", "results": results_out}
 
     try:
@@ -373,6 +377,9 @@ def deploy_batch_with_stagger(
         return out
     except Exception as e:
         update_state(task_id, status="completed", error=str(e))
+        user_id = (get_state(task_id) or {}).get("user_id")
+        if user_id is not None:
+            remove_user_task(user_id, task_id)
         return {"status": "error", "message": str(e), "results": results_out}
 
 
@@ -403,7 +410,7 @@ def generate_batch_async(
     Progress stored in Redis under generate_batch:{task_id}.
     """
     import asyncio
-    from app.services.generate_batch_state import get_state, set_state, update_state
+    from app.services.generate_batch_state import get_state, set_state, update_state, remove_user_task
     from app.services.generator import generate_doorway, _keyword_to_slug
     from app.services.dataforseo_service import get_language_code
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -520,9 +527,11 @@ def generate_batch_async(
 
     try:
         asyncio.run(run())
+        remove_user_task(user_id, task_id)
         return {"status": "ok", "created": created, "results": results}
     except Exception as e:
         update_state(task_id, status="completed", error=str(e), results=results, created=created)
+        remove_user_task(user_id, task_id)
         return {"status": "error", "message": str(e), "created": created, "results": results}
 
 
@@ -533,7 +542,7 @@ def delete_batch_async(self, user_id: int, doorway_ids: list[int]):
     Progress stored in Redis under delete_batch:{task_id}.
     """
     import asyncio
-    from app.services.delete_batch_state import set_state, update_state
+    from app.services.delete_batch_state import set_state, update_state, remove_user_task
     from app.services.deploy import remove_doorway_from_server
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from sqlalchemy import select, delete
@@ -597,8 +606,10 @@ def delete_batch_async(self, user_id: int, doorway_ids: list[int]):
 
     try:
         asyncio.run(run())
+        remove_user_task(user_id, task_id)
     except Exception as e:
         update_state(task_id, status="completed", error=str(e))
+        remove_user_task(user_id, task_id)
 
 
 @celery_app.task

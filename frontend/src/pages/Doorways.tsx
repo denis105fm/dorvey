@@ -121,6 +121,26 @@ export default function Doorways() {
 
   const [openProcess, setOpenProcess] = useState<{ type: ProcessType; task_id: string } | null>(null);
 
+  const { data: activeBatchTasks } = useQuery({
+    queryKey: ["active-batch-tasks"],
+    queryFn: () => api.get("/doorways/active-batch-tasks").then((r) => r.data as { deploy?: string[]; generate?: string[]; delete?: string[] }),
+  });
+  useEffect(() => {
+    if (!activeBatchTasks) return;
+    if (Array.isArray(activeBatchTasks.deploy)) {
+      setBatchDeployTaskIdsState(activeBatchTasks.deploy);
+      saveTaskIds("dorvey_batch_deploy_task_ids", activeBatchTasks.deploy);
+    }
+    if (Array.isArray(activeBatchTasks.generate)) {
+      setBatchGenerateTaskIdsState(activeBatchTasks.generate);
+      saveTaskIds("dorvey_batch_generate_task_ids", activeBatchTasks.generate);
+    }
+    if (Array.isArray(activeBatchTasks.delete)) {
+      setBatchDeleteTaskIdsState(activeBatchTasks.delete);
+      saveTaskIds("dorvey_batch_delete_task_ids", activeBatchTasks.delete);
+    }
+  }, [activeBatchTasks]);
+
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
     queryFn: () => api.get("/doorways/", { params: filterCampaign ? { campaign_id: +filterCampaign } : {} }).then((r) => r.data),
@@ -183,6 +203,13 @@ export default function Doorways() {
     batchQualityResults.forEach((r) => (r.warning_codes || []).forEach((w: { code: string }) => set.add(w.code)));
     return Array.from(set).filter((code) => code in FIX_CODE_LABELS);
   }, [batchQualityResults]);
+
+  const batchDeployStatusByDoorwayId = useMemo(() => {
+    if (openProcess?.type !== "deploy" || !processStatus?.results?.length) return new Map<number, string>();
+    const m = new Map<number, string>();
+    (processStatus.results as { doorway_id: number; status: string }[]).forEach((r) => m.set(r.doorway_id, r.status));
+    return m;
+  }, [openProcess?.type, openProcess?.task_id, processStatus?.results]);
 
   const batchGenerateCompletedToastRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1046,23 +1073,32 @@ export default function Doorways() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-0.5">
-                          <span className={`px-2 py-1 rounded text-xs font-medium inline-flex w-fit ${
-                            d.status === "deployed" || d.status === "indexed" ? "bg-emerald-500/20 text-emerald-400" :
-                            d.status === "paused" ? "bg-amber-500/20 text-amber-400" :
-                            "bg-slate-600 text-slate-300"
-                          }`}>
-                            {STATUS_LABELS[d.status] ?? d.status}
-                          </span>
-                          {d.status === "paused" && d.pause_reason && (
-                            <span className="text-slate-500 text-xs max-w-[220px] truncate" title={d.pause_reason}>
-                              {d.pause_reason}
-                            </span>
-                          )}
+                          {(() => {
+                            const batchStatus = batchDeployStatusByDoorwayId.get(d.id);
+                            const isDeployedByBatch = batchStatus === "success";
+                            const isDeployingByBatch = batchStatus === "deploying";
+                            const isErrorByBatch = batchStatus === "error";
+                            const displayStatus = isDeployedByBatch ? "deployed" : isDeployingByBatch ? "deploying" : isErrorByBatch ? "error" : d.status;
+                            const label = isDeployedByBatch ? "Задеплоен" : isDeployingByBatch ? "Деплой…" : isErrorByBatch ? "Ошибка" : (STATUS_LABELS[d.status] ?? d.status);
+                            const statusClass = displayStatus === "deployed" ? "bg-emerald-500/20 text-emerald-400" : isDeployingByBatch ? "bg-amber-500/20 text-amber-400" : isErrorByBatch ? "bg-red-500/20 text-red-400" : d.status === "paused" ? "bg-amber-500/20 text-amber-400" : "bg-slate-600 text-slate-300";
+                            return (
+                              <>
+                                <span className={`px-2 py-1 rounded text-xs font-medium inline-flex w-fit ${statusClass}`}>
+                                  {label}
+                                </span>
+                                {d.status === "paused" && d.pause_reason && !batchStatus && (
+                                  <span className="text-slate-500 text-xs max-w-[220px] truncate" title={d.pause_reason}>
+                                    {d.pause_reason}
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {liveUrl && (d.status === "deployed" || d.status === "indexed") && (
+                          {liveUrl && (batchDeployStatusByDoorwayId.get(d.id) === "success" || d.status === "deployed" || d.status === "indexed") && (
                             <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-emerald-400" title="Открыть">
                               <ExternalLink size={18} />
                             </a>
@@ -1406,7 +1442,7 @@ export default function Doorways() {
                   <>
                     <div className="mb-4">
                       <div className="flex justify-between text-sm text-slate-400 mb-1">
-                        <span>{processStatus.status === "running" && "В процессе…"} {processStatus.status === "paused" && "На паузе"} {processStatus.status === "completed" && "Завершён"} {processStatus.status === "cancelled" && "Отменён"}</span>
+                        <span>{processStatus.status === "queued" && "Подготовка…"} {processStatus.status === "running" && "В процессе…"} {processStatus.status === "paused" && "На паузе"} {processStatus.status === "completed" && "Завершён"} {processStatus.status === "cancelled" && "Отменён"}</span>
                         <span>{processStatus.current_index ?? 0} / {processStatus.total ?? 0}{processStatus.total ? ` (${Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100)}%)` : ""}</span>
                       </div>
                       <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
