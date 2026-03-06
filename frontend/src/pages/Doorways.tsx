@@ -172,9 +172,6 @@ export default function Doorways() {
       return d && (d.status === "running" || d.status === "paused") ? 2500 : false;
     },
   });
-  const batchDeployStatus = openProcess?.type === "deploy" ? processStatus : undefined;
-  const batchGenerateStatus = openProcess?.type === "generate" ? processStatus : undefined;
-  const batchDeleteStatus = openProcess?.type === "delete" ? processStatus : undefined;
   const metricsByDoorway = useMemo(() => {
     const map = new Map<number, DoorwayMetric>();
     (doorwaysMetrics?.doorways ?? []).forEach((m: DoorwayMetric) => map.set(m.doorway_id, m));
