@@ -121,9 +121,10 @@ export default function Doorways() {
 
   const [openProcess, setOpenProcess] = useState<{ type: ProcessType; task_id: string } | null>(null);
 
-  const { data: activeBatchTasks } = useQuery({
+  const { data: activeBatchTasks, refetch: refetchActiveBatchTasks } = useQuery({
     queryKey: ["active-batch-tasks"],
     queryFn: () => api.get("/doorways/active-batch-tasks").then((r) => r.data as { deploy?: string[]; generate?: string[]; delete?: string[] }),
+    refetchOnWindowFocus: true,
   });
   useEffect(() => {
     if (!activeBatchTasks) return;
@@ -171,7 +172,7 @@ export default function Doorways() {
     queryKey: ["analytics-early-doorways", 3, 20],
     queryFn: () => api.get("/analytics/early-doorways", { params: { days: 3, min_clicks: 20 } }).then((r) => r.data),
   });
-  const { data: processStatus, refetch: refetchProcessStatus } = useQuery({
+  const { data: processStatus, refetch: refetchProcessStatus, isError: processStatusError } = useQuery({
     queryKey: ["process-status", openProcess?.type, openProcess?.task_id],
     queryFn: async () => {
       if (!openProcess) return null;
@@ -189,7 +190,7 @@ export default function Doorways() {
     enabled: !!openProcess?.type && !!openProcess?.task_id,
     refetchInterval: (query) => {
       const d = query.state.data as { status?: string } | undefined;
-      return d && (d.status === "running" || d.status === "paused") ? 2500 : false;
+      return d && (d.status === "running" || d.status === "paused" || d.status === "queued") ? 2500 : false;
     },
   });
   const metricsByDoorway = useMemo(() => {
@@ -538,9 +539,19 @@ export default function Doorways() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-white">Дорвеи</h1>
-        <Button onClick={() => { setShowGenerate(!showGenerate); if (!showGenerate) { setWizardStep(0); setResult(null); } }}>
-          {showGenerate ? "Скрыть" : "Сгенерировать"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => refetchActiveBatchTasks()}
+            className="text-slate-400 hover:text-white text-sm"
+            title="Подгрузить активные деплои/генерации с сервера"
+          >
+            Проверить процессы
+          </button>
+          <Button onClick={() => { setShowGenerate(!showGenerate); if (!showGenerate) { setWizardStep(0); setResult(null); } }}>
+            {showGenerate ? "Скрыть" : "Сгенерировать"}
+          </Button>
+        </div>
       </div>
 
       {(batchGenerateTaskIds.length > 0 || batchDeployTaskIds.length > 0 || batchDeleteTaskIds.length > 0) && (
@@ -573,6 +584,14 @@ export default function Doorways() {
               Удаление {batchDeleteTaskIds.length > 1 ? i + 1 : ""}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => refetchActiveBatchTasks()}
+            className="ml-2 rounded-lg px-2 py-1 text-xs text-slate-400 hover:text-white hover:bg-slate-700"
+            title="Подгрузить активные процессы с сервера (другой комп/вкладка)"
+          >
+            Обновить
+          </button>
         </div>
       )}
 
@@ -1424,7 +1443,6 @@ export default function Doorways() {
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
           onClick={() => {
             const done = processStatus?.status === "completed" || processStatus?.status === "cancelled";
-            if (!done) return;
             if (done && openProcess.type === "deploy") { removeDeployTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); }
             if (done && openProcess.type === "generate") { removeGenerateTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); }
             if (done && openProcess.type === "delete") { removeDeleteTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); }
@@ -1436,7 +1454,7 @@ export default function Doorways() {
               <>
                 <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
                   <span>Пакетный деплой</span>
-                  <button onClick={() => { const done = processStatus?.status === "completed" || processStatus?.status === "cancelled"; if (!done) return; removeDeployTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
+                  <button onClick={() => { if (processStatus?.status === "completed" || processStatus?.status === "cancelled") { removeDeployTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); } setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
                 </h2>
                 {processStatus ? (
                   <>
@@ -1457,7 +1475,14 @@ export default function Doorways() {
                             <tr key={r.doorway_id} className="border-b border-slate-700/50">
                               <td className="py-2 px-2 align-middle">
                                 {r.status === "pending" && <span className="text-slate-500">В очереди</span>}
-                                {r.status === "deploying" && <span className="text-amber-400 text-xs">Деплой…</span>}
+                                {r.status === "deploying" && (
+                                  <span className="inline-flex flex-col gap-0.5">
+                                    <span className="text-amber-400 text-xs">Деплой…</span>
+                                    <div className="h-0.5 w-12 bg-slate-600 rounded overflow-hidden">
+                                      <div className="h-full w-full bg-amber-500 rounded animate-pulse" style={{ width: "40%" }} />
+                                    </div>
+                                  </span>
+                                )}
                                 {r.status === "success" && <span className="text-emerald-400">✓</span>}
                                 {r.status === "error" && <span className="text-red-400">Ошибка</span>}
                               </td>
@@ -1489,7 +1514,16 @@ export default function Doorways() {
                     </div>
                   </>
                 ) : (
-                  <p className="text-slate-400">Загрузка статуса…</p>
+                  <>
+                    {processStatusError ? (
+                      <div className="py-4">
+                        <p className="text-amber-400 mb-2">Не удалось загрузить статус. Задача может ещё выполняться на сервере.</p>
+                        <Button variant="secondary" size="sm" onClick={() => refetchProcessStatus()}>Повторить</Button>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400">Загрузка статуса…</p>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -1498,7 +1532,7 @@ export default function Doorways() {
               <>
                 <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
                   <span>Пакетная генерация</span>
-                  <button onClick={() => { if (processStatus?.status !== "completed") return; removeGenerateTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
+                  <button onClick={() => { if (processStatus?.status === "completed") { removeGenerateTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); } setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
                 </h2>
                 {processStatus ? (
                   <>
@@ -1543,7 +1577,7 @@ export default function Doorways() {
               <>
                 <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
                   <span>Удаление дорвеев</span>
-                  <button onClick={() => { const done = processStatus?.status === "completed" || processStatus?.status === "cancelled"; if (!done) return; removeDeleteTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
+                  <button onClick={() => { if (processStatus?.status === "completed" || processStatus?.status === "cancelled") { removeDeleteTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); } setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
                 </h2>
                 {processStatus ? (
                   <>
