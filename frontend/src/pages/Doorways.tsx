@@ -41,6 +41,34 @@ const GEO_OPTIONS = ["US", "DE", "PL", "RU", "GB", "FR", "ES", "IT", "UA", "KZ",
 
 const PER_PAGE = 500;
 
+function loadTaskIds(key: string): string[] {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === "string");
+      if (typeof parsed === "string" && parsed) return [parsed];
+    }
+    const legacy = sessionStorage.getItem(key.replace("_ids", "_id"));
+    if (legacy) return [legacy];
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+function saveTaskIds(key: string, ids: string[]) {
+  try {
+    if (ids.length) sessionStorage.setItem(key, JSON.stringify(ids));
+    else sessionStorage.removeItem(key);
+    sessionStorage.removeItem(key.replace("_ids", "_id"));
+  } catch {
+    /* ignore */
+  }
+}
+
+export type ProcessType = "generate" | "deploy" | "delete";
+
 export default function Doorways() {
   const qc = useQueryClient();
   const [wizardStep, setWizardStep] = useState(0);
@@ -63,60 +91,35 @@ export default function Doorways() {
   const [cloneDomainId, setCloneDomainId] = useState<number>(0);
   const [clonePath, setClonePath] = useState("/");
   const [selectedDoorwayIds, setSelectedDoorwayIds] = useState<Set<number>>(new Set());
+  const [selectForDeployN, setSelectForDeployN] = useState(150);
   const [batchQualityResults, setBatchQualityResults] = useState<Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[]; warning_codes?: { code: string; message: string }[] }> | null>(null);
   const [qualityApplySelectedIds, setQualityApplySelectedIds] = useState<Set<number>>(new Set());
   const [qualityApplyFixCodes, setQualityApplyFixCodes] = useState<Set<string>>(new Set());
-  const [batchDeployTaskId, setBatchDeployTaskIdState] = useState<string | null>(() => {
-    try {
-      return sessionStorage.getItem("dorvey_batch_deploy_task_id") || null;
-    } catch {
-      return null;
-    }
-  });
-  const setBatchDeployTaskId = (id: string | null) => {
-    setBatchDeployTaskIdState(id);
-    try {
-      if (id) sessionStorage.setItem("dorvey_batch_deploy_task_id", id);
-      else sessionStorage.removeItem("dorvey_batch_deploy_task_id");
-    } catch {
-      /* ignore */
-    }
+  const [batchDeployTaskIds, setBatchDeployTaskIdsState] = useState<string[]>(() => loadTaskIds("dorvey_batch_deploy_task_ids"));
+  const setBatchDeployTaskIds = (ids: string[]) => {
+    setBatchDeployTaskIdsState(ids);
+    saveTaskIds("dorvey_batch_deploy_task_ids", ids);
   };
-  const [batchDeployModalOpen, setBatchDeployModalOpen] = useState(false);
-  const [batchDeleteTaskId, setBatchDeleteTaskIdState] = useState<string | null>(() => {
-    try {
-      return sessionStorage.getItem("dorvey_batch_delete_task_id") || null;
-    } catch {
-      return null;
-    }
-  });
-  const setBatchDeleteTaskId = (id: string | null) => {
-    setBatchDeleteTaskIdState(id);
-    try {
-      if (id) sessionStorage.setItem("dorvey_batch_delete_task_id", id);
-      else sessionStorage.removeItem("dorvey_batch_delete_task_id");
-    } catch {
-      /* ignore */
-    }
+  const addDeployTaskId = (id: string) => setBatchDeployTaskIds([...batchDeployTaskIds, id]);
+  const removeDeployTaskId = (id: string) => setBatchDeployTaskIds(batchDeployTaskIds.filter((x) => x !== id));
+
+  const [batchDeleteTaskIds, setBatchDeleteTaskIdsState] = useState<string[]>(() => loadTaskIds("dorvey_batch_delete_task_ids"));
+  const setBatchDeleteTaskIds = (ids: string[]) => {
+    setBatchDeleteTaskIdsState(ids);
+    saveTaskIds("dorvey_batch_delete_task_ids", ids);
   };
-  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
-  const [batchGenerateTaskId, setBatchGenerateTaskIdState] = useState<string | null>(() => {
-    try {
-      return sessionStorage.getItem("dorvey_batch_generate_task_id") || null;
-    } catch {
-      return null;
-    }
-  });
-  const setBatchGenerateTaskId = (id: string | null) => {
-    setBatchGenerateTaskIdState(id);
-    try {
-      if (id) sessionStorage.setItem("dorvey_batch_generate_task_id", id);
-      else sessionStorage.removeItem("dorvey_batch_generate_task_id");
-    } catch {
-      /* ignore */
-    }
+  const addDeleteTaskId = (id: string) => setBatchDeleteTaskIds([...batchDeleteTaskIds, id]);
+  const removeDeleteTaskId = (id: string) => setBatchDeleteTaskIds(batchDeleteTaskIds.filter((x) => x !== id));
+
+  const [batchGenerateTaskIds, setBatchGenerateTaskIdsState] = useState<string[]>(() => loadTaskIds("dorvey_batch_generate_task_ids"));
+  const setBatchGenerateTaskIds = (ids: string[]) => {
+    setBatchGenerateTaskIdsState(ids);
+    saveTaskIds("dorvey_batch_generate_task_ids", ids);
   };
-  const [batchGenerateModalOpen, setBatchGenerateModalOpen] = useState(false);
+  const addGenerateTaskId = (id: string) => setBatchGenerateTaskIds([...batchGenerateTaskIds, id]);
+  const removeGenerateTaskId = (id: string) => setBatchGenerateTaskIds(batchGenerateTaskIds.filter((x) => x !== id));
+
+  const [openProcess, setOpenProcess] = useState<{ type: ProcessType; task_id: string } | null>(null);
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -148,33 +151,30 @@ export default function Doorways() {
     queryKey: ["analytics-early-doorways", 3, 20],
     queryFn: () => api.get("/analytics/early-doorways", { params: { days: 3, min_clicks: 20 } }).then((r) => r.data),
   });
-  const { data: batchDeployStatus, refetch: refetchBatchDeployStatus } = useQuery({
-    queryKey: ["deploy-batch-status", batchDeployTaskId],
-    queryFn: () => api.get(`/deploy/batch/${batchDeployTaskId}/status`).then((r) => r.data as { task_id: string; status: string; total: number; current_index: number; error?: string; results: Array<{ doorway_id: number; status: string; message?: string | null; path: string; domain: string }> }),
-    enabled: !!batchDeployTaskId,
+  const { data: processStatus, refetch: refetchProcessStatus } = useQuery({
+    queryKey: ["process-status", openProcess?.type, openProcess?.task_id],
+    queryFn: async () => {
+      if (!openProcess) return null;
+      if (openProcess.type === "deploy") {
+        return api.get(`/deploy/batch/${openProcess.task_id}/status`).then((r) => ({ type: "deploy" as const, ...r.data }));
+      }
+      if (openProcess.type === "generate") {
+        return api.get(`/doorways/generate-batch/${openProcess.task_id}/status`).then((r) => ({ type: "generate" as const, ...r.data }));
+      }
+      if (openProcess.type === "delete") {
+        return api.get(`/doorways/batch-delete/${openProcess.task_id}/status`).then((r) => ({ type: "delete" as const, ...r.data }));
+      }
+      return null;
+    },
+    enabled: !!openProcess?.type && !!openProcess?.task_id,
     refetchInterval: (query) => {
       const d = query.state.data as { status?: string } | undefined;
       return d && (d.status === "running" || d.status === "paused") ? 2500 : false;
     },
   });
-  const { data: batchGenerateStatus } = useQuery({
-    queryKey: ["generate-batch-status", batchGenerateTaskId],
-    queryFn: () => api.get(`/doorways/generate-batch/${batchGenerateTaskId}/status`).then((r) => r.data as { task_id: string; status: string; total: number; current_index: number; created?: number; error?: string; results: Array<{ keyword: string; geo: string; status: string; error?: string; doorway_id?: number }> }),
-    enabled: !!batchGenerateTaskId,
-    refetchInterval: (query) => {
-      const d = query.state.data as { status?: string } | undefined;
-      return d && d.status === "running" ? 2500 : false;
-    },
-  });
-  const { data: batchDeleteStatus } = useQuery({
-    queryKey: ["delete-batch-status", batchDeleteTaskId],
-    queryFn: () => api.get(`/doorways/batch-delete/${batchDeleteTaskId}/status`).then((r) => r.data as { task_id: string; status: string; total: number; current_index: number; deleted?: number; error?: string; results: Array<{ doorway_id: number; path: string; domain: string; status: string; message?: string | null }> }),
-    enabled: !!batchDeleteTaskId,
-    refetchInterval: (query) => {
-      const d = query.state.data as { status?: string } | undefined;
-      return d && d.status === "running" ? 2500 : false;
-    },
-  });
+  const batchDeployStatus = openProcess?.type === "deploy" ? processStatus : undefined;
+  const batchGenerateStatus = openProcess?.type === "generate" ? processStatus : undefined;
+  const batchDeleteStatus = openProcess?.type === "delete" ? processStatus : undefined;
   const metricsByDoorway = useMemo(() => {
     const map = new Map<number, DoorwayMetric>();
     (doorwaysMetrics?.doorways ?? []).forEach((m: DoorwayMetric) => map.set(m.doorway_id, m));
@@ -189,24 +189,24 @@ export default function Doorways() {
 
   const batchGenerateCompletedToastRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!batchGenerateTaskId || !batchGenerateStatus || batchGenerateStatus.status !== "completed") return;
-    if (batchGenerateCompletedToastRef.current === batchGenerateTaskId) return;
-    batchGenerateCompletedToastRef.current = batchGenerateTaskId;
+    if (openProcess?.type !== "generate" || !processStatus || processStatus.status !== "completed") return;
+    if (batchGenerateCompletedToastRef.current === openProcess.task_id) return;
+    batchGenerateCompletedToastRef.current = openProcess.task_id;
     qc.invalidateQueries({ queryKey: ["doorways"] });
-    const created = (batchGenerateStatus as { created?: number }).created ?? 0;
+    const created = (processStatus as { created?: number }).created ?? 0;
     if (created > 0) toast.success(`Пакетная генерация завершена. Создано дорвеев: ${created}`);
-  }, [batchGenerateTaskId, batchGenerateStatus, qc]);
+  }, [openProcess?.type, openProcess?.task_id, processStatus, qc]);
 
   const batchDeleteCompletedToastRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!batchDeleteTaskId || !batchDeleteStatus || batchDeleteStatus.status !== "completed") return;
-    if (batchDeleteCompletedToastRef.current === batchDeleteTaskId) return;
-    batchDeleteCompletedToastRef.current = batchDeleteTaskId;
+    if (openProcess?.type !== "delete" || !processStatus || processStatus.status !== "completed") return;
+    if (batchDeleteCompletedToastRef.current === openProcess.task_id) return;
+    batchDeleteCompletedToastRef.current = openProcess.task_id;
     qc.invalidateQueries({ queryKey: ["doorways"] });
     setSelectedDoorwayIds(new Set());
-    const deleted = (batchDeleteStatus as { deleted?: number }).deleted ?? 0;
+    const deleted = (processStatus as { deleted?: number }).deleted ?? 0;
     if (deleted > 0) toast.success(`Удалено дорвеев: ${deleted}`);
-  }, [batchDeleteTaskId, batchDeleteStatus, qc]);
+  }, [openProcess?.type, openProcess?.task_id, processStatus, qc]);
 
   const filtered = useMemo(() => {
     if (!doorways) return [];
@@ -259,8 +259,10 @@ export default function Doorways() {
     mutationFn: (doorway_ids: number[]) => api.post("/deploy/batch", { doorway_ids }).then((r) => r.data),
     onSuccess: (data: { status?: string; task_id?: string; doorway_ids?: number[] }) => {
       if (data.task_id) {
-        setBatchDeployTaskId(data.task_id);
-        setBatchDeployModalOpen(true);
+        if (data?.task_id) {
+          addDeployTaskId(data.task_id);
+          setOpenProcess({ type: "deploy", task_id: data.task_id });
+        }
       }
       setSelectedDoorwayIds(new Set());
       const n = data.doorway_ids?.length ?? 0;
@@ -277,8 +279,10 @@ export default function Doorways() {
     mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-delete", { doorway_ids }).then((r) => r.data as { task_id: string; status: string }),
     onSuccess: (data: { task_id?: string }) => {
       if (data?.task_id) {
-        setBatchDeleteTaskId(data.task_id);
-        setBatchDeleteModalOpen(true);
+      if (data?.task_id) {
+        addDeleteTaskId(data.task_id);
+        setOpenProcess({ type: "delete", task_id: data.task_id });
+      }
         toast.success("Удаление запущено");
       }
     },
@@ -316,8 +320,10 @@ export default function Doorways() {
       api.post("/doorways/generate-batch", payload).then((r) => r.data as { task_id: string; status: string }),
     onSuccess: (data: { task_id?: string }) => {
       if (data?.task_id) {
-        setBatchGenerateTaskId(data.task_id);
-        setBatchGenerateModalOpen(true);
+      if (data?.task_id) {
+        addGenerateTaskId(data.task_id);
+        setOpenProcess({ type: "generate", task_id: data.task_id });
+      }
         toast.success("Пакетная генерация запущена");
       }
     },
@@ -513,6 +519,39 @@ export default function Doorways() {
         </Button>
       </div>
 
+      {(batchGenerateTaskIds.length > 0 || batchDeployTaskIds.length > 0 || batchDeleteTaskIds.length > 0) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/80 px-4 py-2">
+          <span className="text-slate-400 text-sm">Процессы:</span>
+          {batchGenerateTaskIds.map((task_id, i) => (
+            <button
+              key={task_id}
+              onClick={() => setOpenProcess({ type: "generate", task_id })}
+              className={`rounded-lg px-3 py-1.5 text-sm text-white hover:opacity-90 ${openProcess?.type === "generate" && openProcess?.task_id === task_id ? "ring-2 ring-sky-400 bg-sky-600" : "bg-sky-600/80"}`}
+            >
+              Пакетная генерация {batchGenerateTaskIds.length > 1 ? i + 1 : ""}
+            </button>
+          ))}
+          {batchDeployTaskIds.map((task_id, i) => (
+            <button
+              key={task_id}
+              onClick={() => setOpenProcess({ type: "deploy", task_id })}
+              className={`rounded-lg px-3 py-1.5 text-sm text-white hover:opacity-90 ${openProcess?.type === "deploy" && openProcess?.task_id === task_id ? "ring-2 ring-amber-400 bg-amber-600" : "bg-amber-600/80"}`}
+            >
+              Деплой {batchDeployTaskIds.length > 1 ? i + 1 : ""}
+            </button>
+          ))}
+          {batchDeleteTaskIds.map((task_id, i) => (
+            <button
+              key={task_id}
+              onClick={() => setOpenProcess({ type: "delete", task_id })}
+              className={`rounded-lg px-3 py-1.5 text-sm text-white hover:opacity-90 ${openProcess?.type === "delete" && openProcess?.task_id === task_id ? "ring-2 ring-red-400 bg-red-600" : "bg-red-600/80"}`}
+            >
+              Удаление {batchDeleteTaskIds.length > 1 ? i + 1 : ""}
+            </button>
+          ))}
+        </div>
+      )}
+
       {earlyDoorways?.doorways?.length > 0 && (
         <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
           <h2 className="text-lg font-medium text-amber-200 mb-2">Первые 48 ч — без конверсий</h2>
@@ -676,11 +715,11 @@ export default function Doorways() {
                 <Button variant="secondary" size="sm" className="mt-2" onClick={runBatch} disabled={batchMut.isPending || !batchKeywords.trim()}>
                   {batchMut.isPending ? "Запуск…" : "Сгенерировать пакет"}
                 </Button>
-                {batchGenerateTaskId && !batchGenerateModalOpen && (batchGenerateStatus?.status === "running" || batchGenerateStatus === undefined) && (
-                  <p className="mt-2 text-amber-400 text-sm">Генерация идёт на сервере. <button type="button" onClick={() => setBatchGenerateModalOpen(true)} className="underline">Открыть прогресс</button></p>
+                {batchGenerateTaskIds.length > 0 && !(openProcess?.type === "generate") && (
+                  <p className="mt-2 text-amber-400 text-sm">Генерация на сервере. <button type="button" onClick={() => setOpenProcess({ type: "generate", task_id: batchGenerateTaskIds[0] })} className="underline">Открыть прогресс</button></p>
                 )}
-                {batchGenerateTaskId && batchGenerateStatus?.status === "completed" && !batchGenerateModalOpen && (
-                  <p className="mt-2 text-slate-400 text-sm">Последняя пакетная генерация завершена. <button type="button" onClick={() => setBatchGenerateModalOpen(true)} className="text-emerald-400 underline">Просмотреть результат</button></p>
+                {batchGenerateTaskIds.length > 0 && openProcess?.type === "generate" && processStatus?.status === "completed" && (
+                  <p className="mt-2 text-slate-400 text-sm">Завершено. Можно закрыть окно прогресса и запустить новую.</p>
                 )}
               </div>
               <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки). Галочки FAQ и Квиз действуют для одиночной и пакетной генерации.</p>
@@ -830,6 +869,31 @@ export default function Doorways() {
                     />
                     Выбрать все в списке ({paginated.length})
                   </label>
+                  <span className="flex items-center gap-2 text-slate-400 text-sm">
+                    <label className="flex items-center gap-1.5">
+                      <span>Выбрать для деплоя:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={150}
+                        value={selectForDeployN}
+                        onChange={(e) => setSelectForDeployN(Math.max(1, Math.min(150, parseInt(e.target.value, 10) || 1)))}
+                        className="w-14 px-1.5 py-1 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const deployableFromFiltered = (filtered as Doorway[]).filter((d) => d.status !== "deployed" && d.status !== "indexed");
+                        const firstN = deployableFromFiltered.slice(0, selectForDeployN).map((d) => d.id);
+                        setSelectedDoorwayIds(new Set(firstN));
+                        if (firstN.length > 0) toast.success(`Выбрано ${firstN.length} дорвеев для деплоя`);
+                      }}
+                      className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm"
+                    >
+                      Применить
+                    </button>
+                  </span>
                   {selectedCount > 0 && selectedDeployable.length > 0 && (
                     <button
                       onClick={() => batchDeployMut.mutate(selectedDeployable.map((d) => d.id))}
@@ -839,20 +903,28 @@ export default function Doorways() {
                       {batchDeployMut.isPending ? "Отправка…" : `Деплой выбранных (${selectedDeployable.length})`}
                     </button>
                   )}
-                  {batchDeployTaskId && !batchDeployModalOpen && (batchDeployStatus?.status === "running" || batchDeployStatus?.status === "paused" || batchDeployStatus === undefined) && (
+                  {batchDeployTaskIds.length > 0 && (
                     <button
-                      onClick={() => setBatchDeployModalOpen(true)}
+                      onClick={() => setOpenProcess({ type: "deploy", task_id: batchDeployTaskIds[0] })}
                       className="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg text-sm"
                     >
-                      Прогресс деплоя
+                      Прогресс деплоя{batchDeployTaskIds.length > 1 ? ` (${batchDeployTaskIds.length})` : ""}
                     </button>
                   )}
-                  {batchGenerateTaskId && !batchGenerateModalOpen && (
+                  {batchGenerateTaskIds.length > 0 && (
                     <button
-                      onClick={() => setBatchGenerateModalOpen(true)}
+                      onClick={() => setOpenProcess({ type: "generate", task_id: batchGenerateTaskIds[0] })}
                       className="px-4 py-2 bg-sky-600/80 hover:bg-sky-600 text-white rounded-lg text-sm"
                     >
-                      {batchGenerateStatus?.status === "running" || batchGenerateStatus === undefined ? "Пакетная генерация…" : "Пакетная генерация"}
+                      Пакетная генерация{batchGenerateTaskIds.length > 1 ? ` (${batchGenerateTaskIds.length})` : ""}
+                    </button>
+                  )}
+                  {batchDeleteTaskIds.length > 0 && (
+                    <button
+                      onClick={() => setOpenProcess({ type: "delete", task_id: batchDeleteTaskIds[0] })}
+                      className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-sm"
+                    >
+                      Прогресс удаления{batchDeleteTaskIds.length > 1 ? ` (${batchDeleteTaskIds.length})` : ""}
                     </button>
                   )}
                   {selectedCount > 0 && (
@@ -887,12 +959,12 @@ export default function Doorways() {
                       {batchDeleteMut.isPending ? "Запуск…" : `Удалить выбранные (${selectedCount})`}
                     </button>
                   )}
-                  {batchDeleteTaskId && !batchDeleteModalOpen && (
+                  {batchDeleteTaskIds.length > 0 && (
                     <button
-                      onClick={() => setBatchDeleteModalOpen(true)}
+                      onClick={() => setOpenProcess({ type: "delete", task_id: batchDeleteTaskIds[0] })}
                       className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-sm"
                     >
-                      {batchDeleteStatus?.status === "running" || batchDeleteStatus === undefined ? "Прогресс удаления…" : "Прогресс удаления"}
+                      Прогресс удаления{batchDeleteTaskIds.length > 1 ? ` (${batchDeleteTaskIds.length})` : ""}
                     </button>
                   )}
                 </div>
@@ -1314,294 +1386,168 @@ export default function Doorways() {
         </div>
       )}
 
-      {batchDeployTaskId && batchDeployModalOpen && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { if (batchDeployStatus?.status === "completed" || batchDeployStatus?.status === "cancelled") { setBatchDeployTaskId(null); setBatchDeployModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); } else { setBatchDeployModalOpen(false); } }}>
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
-              <span>Пакетный деплой</span>
-              <button
-                onClick={() => { if (batchDeployStatus?.status === "completed" || batchDeployStatus?.status === "cancelled") { setBatchDeployTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); } setBatchDeployModalOpen(false); }}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </h2>
-            {batchDeployStatus ? (
-              <>
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm text-slate-400 mb-1">
-                    <span>
-                      {batchDeployStatus.status === "running" && "В процессе…"}
-                      {batchDeployStatus.status === "paused" && "На паузе"}
-                      {batchDeployStatus.status === "completed" && "Завершён"}
-                      {batchDeployStatus.status === "cancelled" && "Отменён"}
-                    </span>
-                    <span>
-                      {batchDeployStatus.current_index ?? 0} / {batchDeployStatus.total ?? 0}
-                      {batchDeployStatus.total
-                        ? ` (${Math.round(((batchDeployStatus.current_index ?? 0) / batchDeployStatus.total) * 100)}%)`
-                        : ""}
-                    </span>
-                  </div>
-                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500 transition-all duration-300"
-                      style={{ width: `${batchDeployStatus.total ? Math.round(((batchDeployStatus.current_index ?? 0) / batchDeployStatus.total) * 100) : 0}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-600 text-slate-400 text-left">
-                        <th className="py-2 px-2 font-medium w-24">Статус</th>
-                        <th className="py-2 px-2 font-medium">Путь</th>
-                        <th className="py-2 px-2 font-medium">Домен</th>
-                        <th className="py-2 px-2 font-medium">Сообщение</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(batchDeployStatus.results ?? []).map((r) => (
-                          <tr key={r.doorway_id} className="border-b border-slate-700/50">
-                            <td className="py-2 px-2 align-middle">
-                              {r.status === "pending" && <span className="text-slate-500">В очереди</span>}
-                              {r.status === "deploying" && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-amber-400 text-xs">Деплой…</span>
-                                  <div className="flex-1 min-w-[60px] h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                    <div className="h-full w-1/3 bg-amber-500 rounded-full animate-pulse" style={{ animation: "pulse 1.2s ease-in-out infinite" }} />
-                                  </div>
-                                </div>
-                              )}
-                              {r.status === "success" && <span className="text-emerald-400">✓</span>}
-                              {r.status === "error" && <span className="text-red-400">Ошибка</span>}
-                            </td>
-                            <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path || "—"}</td>
-                            <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain || "—"}</td>
-                            <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
-                          </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {batchDeployStatus.error && (
-                  <p className="text-red-400 text-sm mt-2">{batchDeployStatus.error}</p>
-                )}
-                <div className="pt-4 flex gap-2 flex-wrap">
-                  {batchDeployStatus.status === "running" && (
-                    <>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/pause`); refetchBatchDeployStatus(); }}
-                      >
-                        Пауза
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/cancel`); refetchBatchDeployStatus(); }}
-                      >
-                        Отменить
-                      </Button>
-                    </>
-                  )}
-                  {batchDeployStatus.status === "paused" && (
-                    <>
-                      <Button
-                        size="sm"
-                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/resume`); refetchBatchDeployStatus(); }}
-                      >
-                        Продолжить
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={async () => { await api.post(`/deploy/batch/${batchDeployTaskId}/cancel`); refetchBatchDeployStatus(); }}
-                      >
-                        Отменить
-                      </Button>
-                    </>
-                  )}
-                  {(batchDeployStatus.status === "completed" || batchDeployStatus.status === "cancelled") && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => { setBatchDeployTaskId(null); setBatchDeployModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
-                    >
-                      Закрыть
-                    </Button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <p className="text-slate-400">Загрузка статуса…</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {batchGenerateTaskId && batchGenerateModalOpen && (
+      {openProcess && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-          onClick={() => { if (batchGenerateStatus?.status === "completed") { setBatchGenerateTaskId(null); setBatchGenerateModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); } else { setBatchGenerateModalOpen(false); } }}
+          onClick={() => {
+            const done = processStatus?.status === "completed" || processStatus?.status === "cancelled";
+            if (done && openProcess.type === "deploy") { removeDeployTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); }
+            if (done && openProcess.type === "generate") { removeGenerateTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); }
+            if (done && openProcess.type === "delete") { removeDeleteTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); }
+            setOpenProcess(null);
+          }}
         >
           <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
-              <span>Пакетная генерация</span>
-              <button
-                onClick={() => { if (batchGenerateStatus?.status === "completed") { setBatchGenerateTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); } setBatchGenerateModalOpen(false); }}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </h2>
-            {batchGenerateStatus ? (
+            {openProcess.type === "deploy" && (
               <>
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm text-slate-400 mb-1">
-                    <span>
-                      {batchGenerateStatus.status === "running" && "Генерация на сервере…"}
-                      {batchGenerateStatus.status === "completed" && "Завершено"}
-                    </span>
-                    <span>
-                      {batchGenerateStatus.current_index ?? 0} / {batchGenerateStatus.total ?? 0}
-                      {batchGenerateStatus.total
-                        ? ` (${Math.round(((batchGenerateStatus.current_index ?? 0) / batchGenerateStatus.total) * 100)}%)`
-                        : ""}
-                    </span>
-                  </div>
-                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-sky-500 transition-all duration-300"
-                      style={{ width: `${batchGenerateStatus.total ? Math.round(((batchGenerateStatus.current_index ?? 0) / batchGenerateStatus.total) * 100) : 0}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-600 text-slate-400 text-left">
-                        <th className="py-2 px-2 font-medium w-24">Статус</th>
-                        <th className="py-2 px-2 font-medium">Ключ</th>
-                        <th className="py-2 px-2 font-medium w-16">Geo</th>
-                        <th className="py-2 px-2 font-medium">Сообщение</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(batchGenerateStatus.results ?? []).map((r, idx) => (
-                        <tr key={idx} className="border-b border-slate-700/50">
-                          <td className="py-2 px-2 align-middle">
-                            {r.status === "ok" && <span className="text-emerald-400">✓</span>}
-                            {r.status === "error" && <span className="text-red-400">Ошибка</span>}
-                          </td>
-                          <td className="py-2 px-2 text-slate-300 text-xs">{r.keyword ?? "—"}</td>
-                          <td className="py-2 px-2 text-slate-400 text-xs">{r.geo ?? "—"}</td>
-                          <td className="py-2 px-2 text-slate-500 text-xs">{r.error ?? (r.doorway_id ? `#${r.doorway_id}` : "—")}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {batchGenerateStatus.error && (
-                  <p className="text-red-400 text-sm mt-2">{batchGenerateStatus.error}</p>
+                <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
+                  <span>Пакетный деплой</span>
+                  <button onClick={() => { if (processStatus?.status === "completed" || processStatus?.status === "cancelled") { removeDeployTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); } setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
+                </h2>
+                {processStatus ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-slate-400 mb-1">
+                        <span>{processStatus.status === "running" && "В процессе…"} {processStatus.status === "paused" && "На паузе"} {processStatus.status === "completed" && "Завершён"} {processStatus.status === "cancelled" && "Отменён"}</span>
+                        <span>{processStatus.current_index ?? 0} / {processStatus.total ?? 0}{processStatus.total ? ` (${Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100)}%)` : ""}</span>
+                      </div>
+                      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${processStatus.total ? Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100) : 0}%` }} />
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b border-slate-600 text-slate-400 text-left"><th className="py-2 px-2 font-medium w-24">Статус</th><th className="py-2 px-2 font-medium">Путь</th><th className="py-2 px-2 font-medium">Домен</th><th className="py-2 px-2 font-medium">Сообщение</th></tr></thead>
+                        <tbody>
+                          {(processStatus.results ?? []).map((r: { doorway_id: number; status: string; message?: string | null; path: string; domain: string }) => (
+                            <tr key={r.doorway_id} className="border-b border-slate-700/50">
+                              <td className="py-2 px-2 align-middle">
+                                {r.status === "pending" && <span className="text-slate-500">В очереди</span>}
+                                {r.status === "deploying" && <span className="text-amber-400 text-xs">Деплой…</span>}
+                                {r.status === "success" && <span className="text-emerald-400">✓</span>}
+                                {r.status === "error" && <span className="text-red-400">Ошибка</span>}
+                              </td>
+                              <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path || "—"}</td>
+                              <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain || "—"}</td>
+                              <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {processStatus.error && <p className="text-red-400 text-sm mt-2">{processStatus.error}</p>}
+                    <div className="pt-4 flex gap-2 flex-wrap">
+                      {processStatus.status === "running" && (
+                        <>
+                          <Button variant="secondary" size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/pause`); refetchProcessStatus(); }}>Пауза</Button>
+                          <Button variant="destructive" size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/cancel`); refetchProcessStatus(); }}>Отменить</Button>
+                        </>
+                      )}
+                      {processStatus.status === "paused" && (
+                        <>
+                          <Button size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/resume`); refetchProcessStatus(); }}>Продолжить</Button>
+                          <Button variant="destructive" size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/cancel`); refetchProcessStatus(); }}>Отменить</Button>
+                        </>
+                      )}
+                      {(processStatus.status === "completed" || processStatus.status === "cancelled") && (
+                        <Button variant="secondary" onClick={() => { removeDeployTaskId(openProcess.task_id); setOpenProcess(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}>Закрыть</Button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-slate-400">Загрузка статуса…</p>
                 )}
-                <div className="pt-4 flex gap-2">
-                  {batchGenerateStatus.status === "completed" && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => { setBatchGenerateTaskId(null); setBatchGenerateModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
-                    >
-                      Закрыть
-                    </Button>
-                  )}
-                </div>
               </>
-            ) : (
-              <p className="text-slate-400">Загрузка статуса…</p>
             )}
-          </div>
-        </div>
-      )}
 
-      {batchDeleteTaskId && batchDeleteModalOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-          onClick={() => { if (batchDeleteStatus?.status === "completed") { setBatchDeleteTaskId(null); setBatchDeleteModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); } else { setBatchDeleteModalOpen(false); } }}
-        >
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
-              <span>Удаление дорвеев</span>
-              <button
-                onClick={() => { if (batchDeleteStatus?.status === "completed") { setBatchDeleteTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); } setBatchDeleteModalOpen(false); }}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </h2>
-            {batchDeleteStatus ? (
+            {openProcess.type === "generate" && (
               <>
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm text-slate-400 mb-1">
-                    <span>
-                      {batchDeleteStatus.status === "running" && "Удаление с сервера и из базы…"}
-                      {batchDeleteStatus.status === "completed" && "Завершено"}
-                    </span>
-                    <span>
-                      {batchDeleteStatus.current_index ?? 0} / {batchDeleteStatus.total ?? 0}
-                      {batchDeleteStatus.total
-                        ? ` (${Math.round(((batchDeleteStatus.current_index ?? 0) / batchDeleteStatus.total) * 100)}%)`
-                        : ""}
-                    </span>
-                  </div>
-                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full bg-red-500 transition-all duration-300 ${batchDeleteStatus.status === "running" ? "animate-pulse" : ""}`}
-                      style={{ width: `${batchDeleteStatus.total ? Math.round(((batchDeleteStatus.current_index ?? 0) / batchDeleteStatus.total) * 100) : 0}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-600 text-slate-400 text-left">
-                        <th className="py-2 px-2 font-medium w-24">Статус</th>
-                        <th className="py-2 px-2 font-medium">Путь</th>
-                        <th className="py-2 px-2 font-medium">Домен</th>
-                        <th className="py-2 px-2 font-medium">Сообщение</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(batchDeleteStatus.results ?? []).map((r, idx) => (
-                        <tr key={idx} className="border-b border-slate-700/50">
-                          <td className="py-2 px-2 align-middle">
-                            {r.status === "removed" && <span className="text-emerald-400">✓ Удалён</span>}
-                            {r.status === "pending" && <span className="text-amber-400 text-xs">В очереди</span>}
-                            {r.status === "error" && <span className="text-red-400">Ошибка</span>}
-                          </td>
-                          <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path ?? "—"}</td>
-                          <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain ?? "—"}</td>
-                          <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {batchDeleteStatus.error && (
-                  <p className="text-red-400 text-sm mt-2">{batchDeleteStatus.error}</p>
+                <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
+                  <span>Пакетная генерация</span>
+                  <button onClick={() => { if (processStatus?.status === "completed") { removeGenerateTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); } setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
+                </h2>
+                {processStatus ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-slate-400 mb-1">
+                        <span>{processStatus.status === "running" && "Генерация на сервере…"} {processStatus.status === "completed" && "Завершено"}</span>
+                        <span>{processStatus.current_index ?? 0} / {processStatus.total ?? 0}{processStatus.total ? ` (${Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100)}%)` : ""}</span>
+                      </div>
+                      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${processStatus.total ? Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100) : 0}%` }} />
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b border-slate-600 text-slate-400 text-left"><th className="py-2 px-2 font-medium w-24">Статус</th><th className="py-2 px-2 font-medium">Ключ</th><th className="py-2 px-2 font-medium w-16">Geo</th><th className="py-2 px-2 font-medium">Сообщение</th></tr></thead>
+                        <tbody>
+                          {(processStatus.results ?? []).map((r: { keyword: string; geo: string; status: string; error?: string; doorway_id?: number }, idx: number) => (
+                            <tr key={idx} className="border-b border-slate-700/50">
+                              <td className="py-2 px-2 align-middle">{r.status === "ok" && <span className="text-emerald-400">✓</span>} {r.status === "error" && <span className="text-red-400">Ошибка</span>}</td>
+                              <td className="py-2 px-2 text-slate-300 text-xs">{r.keyword ?? "—"}</td>
+                              <td className="py-2 px-2 text-slate-400 text-xs">{r.geo ?? "—"}</td>
+                              <td className="py-2 px-2 text-slate-500 text-xs">{r.error ?? (r.doorway_id ? `#${r.doorway_id}` : "—")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {processStatus.error && <p className="text-red-400 text-sm mt-2">{processStatus.error}</p>}
+                    <div className="pt-4 flex gap-2">
+                      {processStatus.status === "completed" && (
+                        <Button variant="secondary" onClick={() => { removeGenerateTaskId(openProcess.task_id); setOpenProcess(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}>Закрыть</Button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-slate-400">Загрузка статуса…</p>
                 )}
-                <div className="pt-4 flex gap-2">
-                  {batchDeleteStatus.status === "completed" && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => { setBatchDeleteTaskId(null); setBatchDeleteModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); }}
-                    >
-                      Закрыть
-                    </Button>
-                  )}
-                </div>
               </>
-            ) : (
-              <p className="text-slate-400">Загрузка статуса…</p>
+            )}
+
+            {openProcess.type === "delete" && (
+              <>
+                <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
+                  <span>Удаление дорвеев</span>
+                  <button onClick={() => { if (processStatus?.status === "completed") { removeDeleteTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); } setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
+                </h2>
+                {processStatus ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-slate-400 mb-1">
+                        <span>{processStatus.status === "running" && "Удаление с сервера и из базы…"} {processStatus.status === "completed" && "Завершено"}</span>
+                        <span>{processStatus.current_index ?? 0} / {processStatus.total ?? 0}{processStatus.total ? ` (${Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100)}%)` : ""}</span>
+                      </div>
+                      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div className={`h-full bg-red-500 transition-all duration-300 ${processStatus.status === "running" ? "animate-pulse" : ""}`} style={{ width: `${processStatus.total ? Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100) : 0}%` }} />
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b border-slate-600 text-slate-400 text-left"><th className="py-2 px-2 font-medium w-24">Статус</th><th className="py-2 px-2 font-medium">Путь</th><th className="py-2 px-2 font-medium">Домен</th><th className="py-2 px-2 font-medium">Сообщение</th></tr></thead>
+                        <tbody>
+                          {(processStatus.results ?? []).map((r: { doorway_id: number; path: string; domain: string; status: string; message?: string | null }, idx: number) => (
+                            <tr key={idx} className="border-b border-slate-700/50">
+                              <td className="py-2 px-2 align-middle">{r.status === "removed" && <span className="text-emerald-400">✓ Удалён</span>} {r.status === "pending" && <span className="text-amber-400 text-xs">В очереди</span>} {r.status === "error" && <span className="text-red-400">Ошибка</span>}</td>
+                              <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path ?? "—"}</td>
+                              <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain ?? "—"}</td>
+                              <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {processStatus.error && <p className="text-red-400 text-sm mt-2">{processStatus.error}</p>}
+                    <div className="pt-4 flex gap-2">
+                      {processStatus.status === "completed" && (
+                        <Button variant="secondary" onClick={() => { removeDeleteTaskId(openProcess.task_id); setOpenProcess(null); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); }}>Закрыть</Button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-slate-400">Загрузка статуса…</p>
+                )}
+              </>
             )}
           </div>
         </div>

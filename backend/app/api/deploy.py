@@ -315,8 +315,8 @@ async def deploy_batch(
 
     if not body.doorway_ids:
         raise HTTPException(status_code=400, detail="doorway_ids required")
-    if len(body.doorway_ids) > 50:
-        raise HTTPException(status_code=400, detail="Max 50 doorways per batch")
+    if len(body.doorway_ids) > 150:
+        raise HTTPException(status_code=400, detail="Максимум 150 дорвеев в одном пакете. Разбейте на несколько деплоев.")
     r = await db.execute(
         select(Doorway.id)
         .join(Campaign)
