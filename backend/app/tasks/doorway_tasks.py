@@ -376,6 +376,231 @@ def deploy_batch_with_stagger(
         return {"status": "error", "message": str(e), "results": results_out}
 
 
+def _generate_batch_geos_for_item(item: dict, target_geos: list | None) -> list[str | None]:
+    """Return list of geos for one batch item (same logic as API)."""
+    geos: list[str | None] = []
+    gs = target_geos or (item.get("target_geos") or [])
+    if gs:
+        geos = [str(g).strip().upper()[:2] if g else None for g in gs if (g or "").strip()]
+    if not geos and (item.get("target_geo") or "").strip():
+        geos = [(item.get("target_geo") or "").strip().upper()[:2]]
+    if not geos:
+        geos = [None]
+    return geos
+
+
+@celery_app.task(bind=True)
+def generate_batch_async(
+    self,
+    user_id: int,
+    items: list[dict],
+    generate_faq: bool = False,
+    generate_quiz: bool = False,
+    target_geos: list[str] | None = None,
+):
+    """
+    Run batch doorway generation in background.
+    Progress stored in Redis under generate_batch:{task_id}.
+    """
+    import asyncio
+    from app.services.generate_batch_state import get_state, set_state, update_state
+    from app.services.generator import generate_doorway, _keyword_to_slug
+    from app.services.dataforseo_service import get_language_code
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy import select
+    from app.core.config import settings
+    from app.models.doorway import Doorway, DoorwayVersion
+    from app.models.campaign import Campaign
+
+    task_id = self.request.id
+    max_created = 100
+    items = (items or [])[:50]
+    results: list[dict] = []
+    created = 0
+
+    async def _check_campaign(db: AsyncSession, campaign_id: int, uid: int) -> bool:
+        r = await db.execute(select(Campaign).where(Campaign.id == campaign_id, Campaign.user_id == uid))
+        return r.scalar_one_or_none() is not None
+
+    async def run():
+        nonlocal created, results
+        engine = create_async_engine(settings.DATABASE_URL)
+        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        total_estimate = 0
+        for it in items:
+            if total_estimate >= max_created:
+                break
+            gs = _generate_batch_geos_for_item(it, target_geos)
+            total_estimate += len(gs)
+        total_estimate = min(total_estimate, max_created)
+        async with async_session() as db:
+            set_state(task_id, {
+                "user_id": user_id,
+                "status": "running",
+                "total": total_estimate,
+                "current_index": 0,
+                "results": [],
+                "created": 0,
+                "error": None,
+            })
+            for item in items:
+                if created >= max_created:
+                    break
+                ok = await _check_campaign(db, item.get("campaign_id") or 0, user_id)
+                if not ok:
+                    results.append({"keyword": item.get("keyword", ""), "geo": "-", "status": "error", "error": "Campaign not found"})
+                    update_state(task_id, current_index=len(results), results=results, created=created)
+                    continue
+                geos = _generate_batch_geos_for_item(item, target_geos)
+                base_path = (item.get("path") or "/").strip() or "/"
+                slug = _keyword_to_slug(item.get("keyword", "")) if base_path == "/" else (base_path.strip("/").split("/")[0] or _keyword_to_slug(item.get("keyword", "")))
+                for geo in geos:
+                    if created >= max_created:
+                        break
+                    if len(geos) > 1 and geo:
+                        path_use = f"/{get_language_code(geo)}/{slug}"
+                    else:
+                        path_use = base_path if base_path != "/" else f"/{slug}"
+                    try:
+                        gen_result = await generate_doorway(
+                            db,
+                            campaign_id=item["campaign_id"],
+                            domain_id=item["domain_id"],
+                            keyword=item["keyword"],
+                            path=path_use,
+                            generate_faq=generate_faq,
+                            generate_quiz=generate_quiz,
+                            target_geo=geo,
+                        )
+                    except (ValueError, Exception) as e:
+                        results.append({"keyword": item.get("keyword", ""), "geo": geo or "-", "status": "error", "error": str(e)[:200]})
+                        update_state(task_id, current_index=len(results), results=results, created=created)
+                        continue
+                    try:
+                        cloaking = {}
+                        if gen_result.get("faq_qa"):
+                            cloaking["faq_qa"] = gen_result["faq_qa"]
+                        if gen_result.get("quiz_questions"):
+                            cloaking["quiz"] = {"enabled": True, "questions": gen_result["quiz_questions"]}
+                        camp = (await db.execute(select(Campaign).where(Campaign.id == item["campaign_id"]))).scalar_one_or_none()
+                        preferred_layout = None
+                        if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
+                            preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
+                        dw = Doorway(
+                            campaign_id=item["campaign_id"],
+                            domain_id=item["domain_id"],
+                            path=path_use,
+                            title=gen_result.get("title"),
+                            content=gen_result.get("content"),
+                            meta_description=gen_result.get("meta_description"),
+                            status="draft",
+                            cloaking_rules=cloaking if cloaking else None,
+                            layout_index=preferred_layout if preferred_layout is not None else None,
+                            target_geo=geo,
+                        )
+                        db.add(dw)
+                        await db.flush()
+                        created += 1
+                        ver = DoorwayVersion(doorway_id=dw.id, content_snapshot={
+                            "title": dw.title, "content": dw.content, "meta_description": dw.meta_description,
+                        })
+                        db.add(ver)
+                        results.append({"keyword": item.get("keyword", ""), "geo": geo or "-", "status": "ok", "doorway_id": dw.id})
+                    except Exception as ex:
+                        results.append({"keyword": item.get("keyword", ""), "geo": geo or "-", "status": "error", "error": str(ex)})
+                    update_state(task_id, current_index=len(results), results=results, created=created)
+            await db.commit()
+            if created > 0:
+                try:
+                    from app.api.billing import notify_billing_limits_if_needed
+                    await notify_billing_limits_if_needed(db, user_id)
+                except Exception:
+                    pass
+        update_state(task_id, status="completed", results=results, created=created)
+
+    try:
+        asyncio.run(run())
+        return {"status": "ok", "created": created, "results": results}
+    except Exception as e:
+        update_state(task_id, status="completed", error=str(e), results=results, created=created)
+        return {"status": "error", "message": str(e), "created": created, "results": results}
+
+
+@celery_app.task(bind=True)
+def delete_batch_async(self, user_id: int, doorway_ids: list[int]):
+    """
+    Run batch doorway delete in background: remove from server then delete from DB.
+    Progress stored in Redis under delete_batch:{task_id}.
+    """
+    import asyncio
+    from app.services.delete_batch_state import set_state, update_state
+    from app.services.deploy import remove_doorway_from_server
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy import select, delete
+    from app.core.config import settings
+    from app.models.doorway import Doorway, DoorwayVersion, DoorwayMetrics
+    from app.models.domain import Domain
+    from app.models.server import Server
+    from app.models.campaign import Campaign
+    from app.models.doorway_source_metrics import DoorwaySourceMetrics
+    from app.models.ab_variant import DoorwayABVariant
+
+    task_id = self.request.id
+    ids = list(doorway_ids or [])[:100]
+
+    async def run():
+        engine = create_async_engine(settings.DATABASE_URL)
+        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with async_session() as db:
+            r = await db.execute(
+                select(Doorway.id, Doorway.path, Domain.domain, Server)
+                .join(Campaign, Doorway.campaign_id == Campaign.id)
+                .join(Domain, Doorway.domain_id == Domain.id)
+                .join(Server, Domain.server_id == Server.id)
+                .where(Doorway.id.in_(ids), Campaign.user_id == user_id)
+            )
+            rows = r.all()
+            # Build list (id, path, domain, server) for allowed doorways only
+            items = []
+            for row in rows:
+                dw_id, path, domain, server = row
+                items.append({"doorway_id": dw_id, "path": path or "/", "domain": (domain or "").strip(), "server": server})
+            allowed_ids = [x["doorway_id"] for x in items]
+            if not allowed_ids:
+                set_state(task_id, {"user_id": user_id, "status": "completed", "total": 0, "current_index": 0, "results": [], "deleted": 0})
+                return
+            results = [{"doorway_id": x["doorway_id"], "path": x["path"], "domain": x["domain"], "status": "pending"} for x in items]
+            set_state(task_id, {
+                "user_id": user_id,
+                "status": "running",
+                "total": len(results),
+                "current_index": 0,
+                "results": results,
+                "deleted": 0,
+            })
+            for i, x in enumerate(items):
+                ok, msg = remove_doorway_from_server(
+                    server=x["server"],
+                    path=x["path"],
+                    base_path=x["server"].path or "/var/www/html",
+                )
+                results[i]["status"] = "removed" if ok else "error"
+                results[i]["message"] = msg if not ok else None
+                update_state(task_id, current_index=i + 1, results=results)
+            await db.execute(delete(DoorwayVersion).where(DoorwayVersion.doorway_id.in_(allowed_ids)))
+            await db.execute(delete(DoorwayMetrics).where(DoorwayMetrics.doorway_id.in_(allowed_ids)))
+            await db.execute(delete(DoorwaySourceMetrics).where(DoorwaySourceMetrics.doorway_id.in_(allowed_ids)))
+            await db.execute(delete(DoorwayABVariant).where(DoorwayABVariant.doorway_id.in_(allowed_ids)))
+            await db.execute(delete(Doorway).where(Doorway.id.in_(allowed_ids)))
+            await db.commit()
+            update_state(task_id, status="completed", results=results, deleted=len(allowed_ids))
+
+    try:
+        asyncio.run(run())
+    except Exception as e:
+        update_state(task_id, status="completed", error=str(e))
+
+
 @celery_app.task
 def cron_run_all():
     """Run all daily cron tasks. Call via Celery Beat."""

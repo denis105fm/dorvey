@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -83,6 +83,40 @@ export default function Doorways() {
     }
   };
   const [batchDeployModalOpen, setBatchDeployModalOpen] = useState(false);
+  const [batchDeleteTaskId, setBatchDeleteTaskIdState] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem("dorvey_batch_delete_task_id") || null;
+    } catch {
+      return null;
+    }
+  });
+  const setBatchDeleteTaskId = (id: string | null) => {
+    setBatchDeleteTaskIdState(id);
+    try {
+      if (id) sessionStorage.setItem("dorvey_batch_delete_task_id", id);
+      else sessionStorage.removeItem("dorvey_batch_delete_task_id");
+    } catch {
+      /* ignore */
+    }
+  };
+  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [batchGenerateTaskId, setBatchGenerateTaskIdState] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem("dorvey_batch_generate_task_id") || null;
+    } catch {
+      return null;
+    }
+  });
+  const setBatchGenerateTaskId = (id: string | null) => {
+    setBatchGenerateTaskIdState(id);
+    try {
+      if (id) sessionStorage.setItem("dorvey_batch_generate_task_id", id);
+      else sessionStorage.removeItem("dorvey_batch_generate_task_id");
+    } catch {
+      /* ignore */
+    }
+  };
+  const [batchGenerateModalOpen, setBatchGenerateModalOpen] = useState(false);
 
   const { data: doorways, isLoading } = useQuery({
     queryKey: ["doorways", filterCampaign || undefined],
@@ -123,6 +157,24 @@ export default function Doorways() {
       return d && (d.status === "running" || d.status === "paused") ? 2500 : false;
     },
   });
+  const { data: batchGenerateStatus, refetch: refetchBatchGenerateStatus } = useQuery({
+    queryKey: ["generate-batch-status", batchGenerateTaskId],
+    queryFn: () => api.get(`/doorways/generate-batch/${batchGenerateTaskId}/status`).then((r) => r.data as { task_id: string; status: string; total: number; current_index: number; created?: number; error?: string; results: Array<{ keyword: string; geo: string; status: string; error?: string; doorway_id?: number }> }),
+    enabled: !!batchGenerateTaskId,
+    refetchInterval: (query) => {
+      const d = query.state.data as { status?: string } | undefined;
+      return d && d.status === "running" ? 2500 : false;
+    },
+  });
+  const { data: batchDeleteStatus } = useQuery({
+    queryKey: ["delete-batch-status", batchDeleteTaskId],
+    queryFn: () => api.get(`/doorways/batch-delete/${batchDeleteTaskId}/status`).then((r) => r.data as { task_id: string; status: string; total: number; current_index: number; deleted?: number; error?: string; results: Array<{ doorway_id: number; path: string; domain: string; status: string; message?: string | null }> }),
+    enabled: !!batchDeleteTaskId,
+    refetchInterval: (query) => {
+      const d = query.state.data as { status?: string } | undefined;
+      return d && d.status === "running" ? 2500 : false;
+    },
+  });
   const metricsByDoorway = useMemo(() => {
     const map = new Map<number, DoorwayMetric>();
     (doorwaysMetrics?.doorways ?? []).forEach((m: DoorwayMetric) => map.set(m.doorway_id, m));
@@ -134,6 +186,27 @@ export default function Doorways() {
     batchQualityResults.forEach((r) => (r.warning_codes || []).forEach((w: { code: string }) => set.add(w.code)));
     return Array.from(set).filter((code) => code in FIX_CODE_LABELS);
   }, [batchQualityResults]);
+
+  const batchGenerateCompletedToastRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!batchGenerateTaskId || !batchGenerateStatus || batchGenerateStatus.status !== "completed") return;
+    if (batchGenerateCompletedToastRef.current === batchGenerateTaskId) return;
+    batchGenerateCompletedToastRef.current = batchGenerateTaskId;
+    qc.invalidateQueries({ queryKey: ["doorways"] });
+    const created = (batchGenerateStatus as { created?: number }).created ?? 0;
+    if (created > 0) toast.success(`Пакетная генерация завершена. Создано дорвеев: ${created}`);
+  }, [batchGenerateTaskId, batchGenerateStatus, qc]);
+
+  const batchDeleteCompletedToastRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!batchDeleteTaskId || !batchDeleteStatus || batchDeleteStatus.status !== "completed") return;
+    if (batchDeleteCompletedToastRef.current === batchDeleteTaskId) return;
+    batchDeleteCompletedToastRef.current = batchDeleteTaskId;
+    qc.invalidateQueries({ queryKey: ["doorways"] });
+    setSelectedDoorwayIds(new Set());
+    const deleted = (batchDeleteStatus as { deleted?: number }).deleted ?? 0;
+    if (deleted > 0) toast.success(`Удалено дорвеев: ${deleted}`);
+  }, [batchDeleteTaskId, batchDeleteStatus, qc]);
 
   const filtered = useMemo(() => {
     if (!doorways) return [];
@@ -201,11 +274,13 @@ export default function Doorways() {
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка массового деплоя"),
   });
   const batchDeleteMut = useMutation({
-    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-delete", { doorway_ids }).then((r) => r.data),
-    onSuccess: (data: { deleted?: number }) => {
-      qc.invalidateQueries({ queryKey: ["doorways"] });
-      setSelectedDoorwayIds(new Set());
-      toast.success(`Удалено дорвеев: ${data.deleted ?? 0}`);
+    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-delete", { doorway_ids }).then((r) => r.data as { task_id: string; status: string }),
+    onSuccess: (data: { task_id?: string }) => {
+      if (data?.task_id) {
+        setBatchDeleteTaskId(data.task_id);
+        setBatchDeleteModalOpen(true);
+        toast.success("Удаление запущено");
+      }
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка удаления"),
   });
@@ -237,14 +312,14 @@ export default function Doorways() {
     },
   });
   const batchMut = useMutation({
-    mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string }[]; generate_faq?: boolean; generate_quiz?: boolean; target_geos?: string[] }) =>
-      api.post("/doorways/generate-batch", payload, { timeout: 600000 }).then((r) => r.data),
-    onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ["doorways"] });
-      const errors = (data.results || []).filter((r: { status?: string }) => r.status === "error");
-      if (data.created > 0) toast.success(`Создано дорвеев: ${data.created}`);
-      if (errors.length > 0 && data.created === 0) toast.error((errors[0] as { error?: string })?.error ?? "Ошибка по ключам");
-      else if (errors.length > 0) toast.warning(`Часть ключей с ошибками: ${(errors[0] as { error?: string })?.error}`);
+    mutationFn: (payload: { items: { campaign_id: number; domain_id: number; keyword: string; path: string; target_geo?: string; target_geos?: string[] }[]; generate_faq?: boolean; generate_quiz?: boolean; target_geos?: string[] }) =>
+      api.post("/doorways/generate-batch", payload).then((r) => r.data as { task_id: string; status: string }),
+    onSuccess: (data: { task_id?: string }) => {
+      if (data?.task_id) {
+        setBatchGenerateTaskId(data.task_id);
+        setBatchGenerateModalOpen(true);
+        toast.success("Пакетная генерация запущена");
+      }
     },
     onError: (e: { response?: { data?: { detail?: string; message?: string } }; message?: string }) => {
       const data = e?.response?.data as { detail?: string; message?: string } | undefined;
@@ -599,11 +674,13 @@ export default function Doorways() {
                   className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 text-sm"
                 />
                 <Button variant="secondary" size="sm" className="mt-2" onClick={runBatch} disabled={batchMut.isPending || !batchKeywords.trim()}>
-                  {batchMut.isPending ? "Генерация..." : "Сгенерировать пакет"}
+                  {batchMut.isPending ? "Запуск…" : "Сгенерировать пакет"}
                 </Button>
-                {batchMut.data && <p className="mt-2 text-slate-400 text-sm">Создано: {batchMut.data.created}</p>}
-                {batchMut.data?.results?.some((r: { status?: string }) => r.status === "error") && (
-                  <p className="mt-1 text-amber-400 text-sm">Первая ошибка: {(batchMut.data.results as Array<{ status?: string; error?: string }>).find((r) => r.status === "error")?.error}</p>
+                {batchGenerateTaskId && !batchGenerateModalOpen && (batchGenerateStatus?.status === "running" || batchGenerateStatus === undefined) && (
+                  <p className="mt-2 text-amber-400 text-sm">Генерация идёт на сервере. <button type="button" onClick={() => setBatchGenerateModalOpen(true)} className="underline">Открыть прогресс</button></p>
+                )}
+                {batchGenerateTaskId && batchGenerateStatus?.status === "completed" && !batchGenerateModalOpen && (
+                  <p className="mt-2 text-slate-400 text-sm">Последняя пакетная генерация завершена. <button type="button" onClick={() => setBatchGenerateModalOpen(true)} className="text-emerald-400 underline">Просмотреть результат</button></p>
                 )}
               </div>
               <p className="text-slate-500 text-xs">«Сгенерировать» — один дорвей по ключу в поле выше. «Сгенерировать пакет» — по каждому ключу из списка (поле выше кнопки). Галочки FAQ и Квиз действуют для одиночной и пакетной генерации.</p>
@@ -770,6 +847,14 @@ export default function Doorways() {
                       Прогресс деплоя
                     </button>
                   )}
+                  {batchGenerateTaskId && !batchGenerateModalOpen && (
+                    <button
+                      onClick={() => setBatchGenerateModalOpen(true)}
+                      className="px-4 py-2 bg-sky-600/80 hover:bg-sky-600 text-white rounded-lg text-sm"
+                    >
+                      {batchGenerateStatus?.status === "running" || batchGenerateStatus === undefined ? "Пакетная генерация…" : "Пакетная генерация"}
+                    </button>
+                  )}
                   {selectedCount > 0 && (
                     <button
                       onClick={() => batchQualityMut.mutate(Array.from(selectedDoorwayIds))}
@@ -790,11 +875,24 @@ export default function Doorways() {
                   )}
                   {selectedCount > 0 && (
                     <button
-                      onClick={() => window.confirm(`Удалить выбранные дорвеи (${selectedCount})?`) && batchDeleteMut.mutate(Array.from(selectedDoorwayIds))}
+                      onClick={() => {
+                        const ids = Array.from(selectedDoorwayIds);
+                        if (!ids.length) return;
+                        if (!window.confirm(`Удалить выбранные дорвеи (${ids.length})?`)) return;
+                        batchDeleteMut.mutate(ids);
+                      }}
                       disabled={batchDeleteMut.isPending}
                       className="px-4 py-2 bg-red-600/80 hover:bg-red-600 disabled:opacity-50 text-white rounded-lg text-sm"
                     >
-                      {batchDeleteMut.isPending ? "Удаление…" : `Удалить выбранные (${selectedCount})`}
+                      {batchDeleteMut.isPending ? "Запуск…" : `Удалить выбранные (${selectedCount})`}
+                    </button>
+                  )}
+                  {batchDeleteTaskId && !batchDeleteModalOpen && (
+                    <button
+                      onClick={() => setBatchDeleteModalOpen(true)}
+                      className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-sm"
+                    >
+                      {batchDeleteStatus?.status === "running" || batchDeleteStatus === undefined ? "Прогресс удаления…" : "Прогресс удаления"}
                     </button>
                   )}
                 </div>
@@ -1329,6 +1427,173 @@ export default function Doorways() {
                     <Button
                       variant="secondary"
                       onClick={() => { setBatchDeployTaskId(null); setBatchDeployModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
+                    >
+                      Закрыть
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-slate-400">Загрузка статуса…</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {batchGenerateTaskId && batchGenerateModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => { if (batchGenerateStatus?.status === "completed") { setBatchGenerateTaskId(null); setBatchGenerateModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); } else { setBatchGenerateModalOpen(false); } }}
+        >
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
+              <span>Пакетная генерация</span>
+              <button
+                onClick={() => { if (batchGenerateStatus?.status === "completed") { setBatchGenerateTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); } setBatchGenerateModalOpen(false); }}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </h2>
+            {batchGenerateStatus ? (
+              <>
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-slate-400 mb-1">
+                    <span>
+                      {batchGenerateStatus.status === "running" && "Генерация на сервере…"}
+                      {batchGenerateStatus.status === "completed" && "Завершено"}
+                    </span>
+                    <span>
+                      {batchGenerateStatus.current_index ?? 0} / {batchGenerateStatus.total ?? 0}
+                      {batchGenerateStatus.total
+                        ? ` (${Math.round(((batchGenerateStatus.current_index ?? 0) / batchGenerateStatus.total) * 100)}%)`
+                        : ""}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-sky-500 transition-all duration-300"
+                      style={{ width: `${batchGenerateStatus.total ? Math.round(((batchGenerateStatus.current_index ?? 0) / batchGenerateStatus.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-600 text-slate-400 text-left">
+                        <th className="py-2 px-2 font-medium w-24">Статус</th>
+                        <th className="py-2 px-2 font-medium">Ключ</th>
+                        <th className="py-2 px-2 font-medium w-16">Geo</th>
+                        <th className="py-2 px-2 font-medium">Сообщение</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(batchGenerateStatus.results ?? []).map((r, idx) => (
+                        <tr key={idx} className="border-b border-slate-700/50">
+                          <td className="py-2 px-2 align-middle">
+                            {r.status === "ok" && <span className="text-emerald-400">✓</span>}
+                            {r.status === "error" && <span className="text-red-400">Ошибка</span>}
+                          </td>
+                          <td className="py-2 px-2 text-slate-300 text-xs">{r.keyword ?? "—"}</td>
+                          <td className="py-2 px-2 text-slate-400 text-xs">{r.geo ?? "—"}</td>
+                          <td className="py-2 px-2 text-slate-500 text-xs">{r.error ?? (r.doorway_id ? `#${r.doorway_id}` : "—")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {batchGenerateStatus.error && (
+                  <p className="text-red-400 text-sm mt-2">{batchGenerateStatus.error}</p>
+                )}
+                <div className="pt-4 flex gap-2">
+                  {batchGenerateStatus.status === "completed" && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => { setBatchGenerateTaskId(null); setBatchGenerateModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); }}
+                    >
+                      Закрыть
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-slate-400">Загрузка статуса…</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {batchDeleteTaskId && batchDeleteModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => { if (batchDeleteStatus?.status === "completed") { setBatchDeleteTaskId(null); setBatchDeleteModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); } else { setBatchDeleteModalOpen(false); } }}
+        >
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-hidden flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
+              <span>Удаление дорвеев</span>
+              <button
+                onClick={() => { if (batchDeleteStatus?.status === "completed") { setBatchDeleteTaskId(null); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); } setBatchDeleteModalOpen(false); }}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </h2>
+            {batchDeleteStatus ? (
+              <>
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-slate-400 mb-1">
+                    <span>
+                      {batchDeleteStatus.status === "running" && "Удаление с сервера и из базы…"}
+                      {batchDeleteStatus.status === "completed" && "Завершено"}
+                    </span>
+                    <span>
+                      {batchDeleteStatus.current_index ?? 0} / {batchDeleteStatus.total ?? 0}
+                      {batchDeleteStatus.total
+                        ? ` (${Math.round(((batchDeleteStatus.current_index ?? 0) / batchDeleteStatus.total) * 100)}%)`
+                        : ""}
+                    </span>
+                  </div>
+                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full bg-red-500 transition-all duration-300 ${batchDeleteStatus.status === "running" ? "animate-pulse" : ""}`}
+                      style={{ width: `${batchDeleteStatus.total ? Math.round(((batchDeleteStatus.current_index ?? 0) / batchDeleteStatus.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-600 text-slate-400 text-left">
+                        <th className="py-2 px-2 font-medium w-24">Статус</th>
+                        <th className="py-2 px-2 font-medium">Путь</th>
+                        <th className="py-2 px-2 font-medium">Домен</th>
+                        <th className="py-2 px-2 font-medium">Сообщение</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(batchDeleteStatus.results ?? []).map((r, idx) => (
+                        <tr key={idx} className="border-b border-slate-700/50">
+                          <td className="py-2 px-2 align-middle">
+                            {r.status === "removed" && <span className="text-emerald-400">✓ Удалён</span>}
+                            {r.status === "pending" && <span className="text-amber-400 text-xs">В очереди</span>}
+                            {r.status === "error" && <span className="text-red-400">Ошибка</span>}
+                          </td>
+                          <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path ?? "—"}</td>
+                          <td className="py-2 px-2 text-slate-400 text-xs truncate max-w-[120px]" title={r.domain}>{r.domain ?? "—"}</td>
+                          <td className="py-2 px-2 text-slate-500 text-xs">{r.message ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {batchDeleteStatus.error && (
+                  <p className="text-red-400 text-sm mt-2">{batchDeleteStatus.error}</p>
+                )}
+                <div className="pt-4 flex gap-2">
+                  {batchDeleteStatus.status === "completed" && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => { setBatchDeleteTaskId(null); setBatchDeleteModalOpen(false); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); }}
                     >
                       Закрыть
                     </Button>

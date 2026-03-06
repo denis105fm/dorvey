@@ -157,97 +157,60 @@ async def generate_doorway_content(
     )
 
 
-@router.post("/generate-batch", response_model=DoorwayBatchGenerateResponse)
+@router.post("/generate-batch")
 async def generate_batch(
     data: DoorwayBatchGenerateRequest,
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    """Start batch generation in background. Returns task_id to poll status at GET /generate-batch/{task_id}/status."""
     if not (data.items and len(data.items) > 0):
         raise HTTPException(status_code=400, detail="Добавьте ключи в поле пакетной генерации (по одному на строку).")
-    results = []
-    created = 0
-    max_created = 100
-    for item in data.items[:50]:
-        if created >= max_created:
-            break
-        ok = await _check_campaign_access(db, item.campaign_id, current_user.id)
-        if not ok:
-            results.append({"keyword": item.keyword, "status": "error", "error": "Campaign not found"})
-            continue
-        geos: list[str | None] = []
-        if (data.target_geos or item.target_geos) and len(data.target_geos or item.target_geos or []) > 0:
-            gs = data.target_geos or item.target_geos or []
-            geos = [g.strip().upper()[:2] for g in gs if (g or "").strip()]
-        elif (item.target_geo or "").strip():
-            geos = [(item.target_geo or "").strip().upper()[:2]]
-        if not geos:
-            geos = [None]
-        base_path = (item.path or "/").strip() or "/"
-        slug = _keyword_to_slug(item.keyword) if base_path == "/" else (base_path.strip("/").split("/")[0] or _keyword_to_slug(item.keyword))
-        item_created = 0
-        for geo in geos:
-            if created >= max_created:
-                break
-            if len(geos) > 1 and geo:
-                path_use = f"/{get_language_code(geo)}/{slug}"
-            else:
-                path_use = base_path if base_path != "/" else f"/{slug}"
-            try:
-                gen_result = await generate_doorway(
-                    db,
-                    campaign_id=item.campaign_id,
-                    domain_id=item.domain_id,
-                    keyword=item.keyword,
-                    path=path_use,
-                    generate_faq=data.generate_faq,
-                    generate_quiz=data.generate_quiz,
-                    target_geo=geo,
-                )
-            except (ValueError, Exception) as e:
-                results.append({"keyword": item.keyword, "geo": geo or "-", "status": "error", "error": str(e)[:200]})
-                continue
-            try:
-                cloaking = {}
-                if gen_result.get("faq_qa"):
-                    cloaking["faq_qa"] = gen_result["faq_qa"]
-                if gen_result.get("quiz_questions"):
-                    cloaking["quiz"] = {"enabled": True, "questions": gen_result["quiz_questions"]}
-                camp = (await db.execute(select(Campaign).where(Campaign.id == item.campaign_id))).scalar_one_or_none()
-                preferred_layout = None
-                if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
-                    preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
-                dw = Doorway(
-                    campaign_id=item.campaign_id,
-                    domain_id=item.domain_id,
-                    path=path_use,
-                    title=gen_result.get("title"),
-                    content=gen_result.get("content"),
-                    meta_description=gen_result.get("meta_description"),
-                    status="draft",
-                    cloaking_rules=cloaking if cloaking else None,
-                    layout_index=preferred_layout if preferred_layout is not None else None,
-                    target_geo=geo,
-                )
-                db.add(dw)
-                await db.flush()
-                created += 1
-                item_created += 1
-                ver = DoorwayVersion(doorway_id=dw.id, content_snapshot={
-                    "title": dw.title, "content": dw.content, "meta_description": dw.meta_description,
-                })
-                db.add(ver)
-                results.append({"keyword": item.keyword, "geo": geo or "-", "status": "ok", "doorway_id": dw.id})
-            except Exception as ex:
-                results.append({"keyword": item.keyword, "geo": geo or "-", "status": "error", "error": str(ex)})
-    await db.commit()
-    if created > 0:
-        try:
-            from app.api.billing import notify_billing_limits_if_needed
-            await notify_billing_limits_if_needed(db, current_user.id)
-        except Exception:
-            pass
-    return DoorwayBatchGenerateResponse(created=created, results=results)
+    from app.tasks.doorway_tasks import generate_batch_async
+    from app.services.generate_batch_state import set_state
+
+    items_payload = [
+        {
+            "campaign_id": it.campaign_id,
+            "domain_id": it.domain_id,
+            "keyword": it.keyword,
+            "path": it.path or "/",
+            "target_geo": it.target_geo,
+            "target_geos": it.target_geos,
+        }
+        for it in data.items[:50]
+    ]
+    task = generate_batch_async.delay(
+        user_id=current_user.id,
+        items=items_payload,
+        generate_faq=data.generate_faq,
+        generate_quiz=data.generate_quiz,
+        target_geos=data.target_geos,
+    )
+    set_state(task.id, {"user_id": current_user.id})
+    return {"status": "queued", "task_id": task.id}
+
+
+@router.get("/generate-batch/{task_id}/status")
+async def generate_batch_status(
+    task_id: str,
+    current_user: CurrentUser,
+):
+    """Get batch generation progress (list, progress bar)."""
+    import asyncio
+    from app.services.generate_batch_state import get_state
+    state = await asyncio.to_thread(get_state, task_id)
+    if not state or state.get("user_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "task_id": task_id,
+        "status": state.get("status", "running"),
+        "total": state.get("total", 0),
+        "current_index": state.get("current_index", 0),
+        "created": state.get("created", 0),
+        "error": state.get("error"),
+        "results": state.get("results") or [],
+    }
 
 
 @router.post("/", response_model=DoorwayResponse)
@@ -561,9 +524,9 @@ async def batch_delete_doorways(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    """Start batch delete in background. Returns task_id to poll status at GET /doorways/batch-delete/{task_id}/status."""
     if not data.doorway_ids:
         return {"deleted": 0, "message": "Нет выбранных дорвеев"}
-    # Только дорвеи текущего пользователя (через кампанию)
     result = await db.execute(
         select(Doorway.id)
         .join(Campaign)
@@ -572,30 +535,34 @@ async def batch_delete_doorways(
     ids = [row[0] for row in result.all()]
     if not ids:
         return {"deleted": 0, "message": "Нет доступных дорвеев для удаления"}
-    # Снимаем страницы с серверов до удаления записей
-    srv_result = await db.execute(
-        select(Doorway, Server)
-        .join(Domain, Doorway.domain_id == Domain.id)
-        .join(Server, Domain.server_id == Server.id)
-        .where(Doorway.id.in_(ids))
-    )
-    for doorway, server in srv_result.all():
-        remove_doorway_from_server(
-            server=server,
-            path=doorway.path or "/",
-            base_path=server.path or "/var/www/html",
-        )
-        # ошибки не прерывают пакетное удаление
-    # Сначала удаляем связанные записи (FK без CASCADE)
-    from app.models.doorway_source_metrics import DoorwaySourceMetrics
-    from app.models.ab_variant import DoorwayABVariant
-    await db.execute(delete(DoorwayVersion).where(DoorwayVersion.doorway_id.in_(ids)))
-    await db.execute(delete(DoorwayMetrics).where(DoorwayMetrics.doorway_id.in_(ids)))
-    await db.execute(delete(DoorwaySourceMetrics).where(DoorwaySourceMetrics.doorway_id.in_(ids)))
-    await db.execute(delete(DoorwayABVariant).where(DoorwayABVariant.doorway_id.in_(ids)))
-    await db.execute(delete(Doorway).where(Doorway.id.in_(ids)))
-    await db.commit()
-    return {"deleted": len(ids), "message": f"Удалено дорвеев: {len(ids)}"}
+    from app.tasks.doorway_tasks import delete_batch_async
+    from app.services.delete_batch_state import set_state
+
+    task = delete_batch_async.delay(user_id=current_user.id, doorway_ids=ids)
+    set_state(task.id, {"user_id": current_user.id})
+    return {"status": "queued", "task_id": task.id, "doorway_ids": ids}
+
+
+@router.get("/batch-delete/{task_id}/status")
+async def batch_delete_status(
+    task_id: str,
+    current_user: CurrentUser,
+):
+    """Get batch delete progress."""
+    import asyncio
+    from app.services.delete_batch_state import get_state
+    state = await asyncio.to_thread(get_state, task_id)
+    if not state or state.get("user_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "task_id": task_id,
+        "status": state.get("status", "running"),
+        "total": state.get("total", 0),
+        "current_index": state.get("current_index", 0),
+        "deleted": state.get("deleted", 0),
+        "error": state.get("error"),
+        "results": state.get("results") or [],
+    }
 
 
 class BatchQualityCheckRequest(BaseModel):
