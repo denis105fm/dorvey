@@ -24,5 +24,9 @@ celery_app.conf.update(
             "schedule": crontab(hour=4, minute=30),
             "kwargs": {"max_per_run": 20},
         },
+        "collect-server-metrics": {
+            "task": "app.tasks.doorway_tasks.collect_server_metrics",
+            "schedule": crontab(minute="*/5"),
+        },
     },
 )

@@ -3,6 +3,7 @@
 from app.models.user import User
 from app.models.campaign import Campaign
 from app.models.server import Server
+from app.models.server_metric import ServerMetric
 from app.models.domain import Domain
 from app.models.doorway import Doorway, DoorwayVersion, DoorwayMetrics
 from app.models.doorway_source_metrics import DoorwaySourceMetrics
@@ -18,6 +19,7 @@ __all__ = [
     "User",
     "Campaign",
     "Server",
+    "ServerMetric",
     "Domain",
     "Doorway",
     "DoorwayVersion",

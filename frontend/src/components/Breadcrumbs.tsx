@@ -11,6 +11,7 @@ const LABELS: Record<string, string> = {
   recommendations: "Рекомендации по офферам",
   "push-ads": "Push-реклама",
   servers: "Серверы",
+  monitoring: "Мониторинг VPS",
   domains: "Домены",
   offers: "Офферы",
   seo: "SEO",

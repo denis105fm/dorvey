@@ -9,6 +9,7 @@ import Doorways from "./pages/Doorways";
 import Templates from "./pages/Templates";
 import Keywords from "./pages/Keywords";
 import Servers from "./pages/Servers";
+import Monitoring from "./pages/Monitoring";
 import Domains from "./pages/Domains";
 import Analytics from "./pages/Analytics";
 import PushAds from "./pages/PushAds";
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="templates" element={<Templates />} />
           <Route path="keywords" element={<Keywords />} />
           <Route path="servers" element={<Servers />} />
+          <Route path="monitoring" element={<Monitoring />} />
           <Route path="domains" element={<Domains />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="recommendations" element={<Recommendations />} />

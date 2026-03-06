@@ -613,6 +613,58 @@ def delete_batch_async(self, user_id: int, doorway_ids: list[int]):
 
 
 @celery_app.task
+def collect_server_metrics():
+    """Collect metrics for all servers via SSH. Run periodically via Celery Beat."""
+    import asyncio
+    from datetime import datetime
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from app.core.config import settings
+    from app.models.server import Server
+    from app.models.server_metric import ServerMetric
+    from app.services.server_metrics import collect_metrics_from_params
+
+    async def run():
+        engine = create_async_engine(settings.DATABASE_URL)
+        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with async_session() as db:
+            r = await db.execute(select(Server))
+            servers = r.scalars().all()
+            for srv in servers:
+                try:
+                    data = collect_metrics_from_params(
+                        host=srv.host,
+                        port=int(srv.port or 22),
+                        user=srv.user or "root",
+                        auth_type=srv.auth_type or "ssh_key",
+                        auth_data=srv.auth_data,
+                    )
+                    if data:
+                        m = ServerMetric(
+                            server_id=srv.id,
+                            created_at=datetime.utcnow(),
+                            load_1=data.get("load_1"),
+                            load_5=data.get("load_5"),
+                            load_15=data.get("load_15"),
+                            mem_total_kb=data.get("mem_total_kb"),
+                            mem_available_kb=data.get("mem_available_kb"),
+                            disk_total_kb=data.get("disk_total_kb"),
+                            disk_used_kb=data.get("disk_used_kb"),
+                            nproc=data.get("nproc"),
+                        )
+                        db.add(m)
+                except Exception:
+                    continue
+            await db.commit()
+        return {"status": "ok", "servers": len(servers)}
+
+    try:
+        return asyncio.run(run())
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@celery_app.task
 def cron_run_all():
     """Run all daily cron tasks. Call via Celery Beat."""
     import asyncio
