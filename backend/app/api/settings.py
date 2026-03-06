@@ -140,6 +140,11 @@ async def get_integrations(
             out[k] = None
     if "vapid_private_key" in out and out.get("vapid_private_key"):
         out["vapid_private_key"] = "***"  # Never expose private key to frontend
+    # Не отдаём полный OpenAI ключ на фронт — только маска, чтобы после обновления страницы
+    # в поле не подставлялся «коротыш» и не уходил на «Проверить» (ошибка «ключ неверный»)
+    if "openai_api_key" in out and out.get("openai_api_key") and len(str(out["openai_api_key"])) > 20:
+        v = str(out["openai_api_key"])
+        out["openai_api_key"] = v[:7] + "..." + v[-4:] if len(v) > 11 else "***"
     for k in BOOL_KEYS:
         if k in out and isinstance(out.get(k), str):
             out[k] = str(out[k]).lower() == "true"

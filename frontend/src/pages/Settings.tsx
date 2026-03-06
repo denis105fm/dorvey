@@ -50,6 +50,12 @@ type IntegrationsData = {
   google_ads_manager_customer_id?: string | null;
 };
 
+/** Маска ключа с бэкенда (sk-...xxxx) — не подставлять в поле и не отправлять на «Проверить». */
+function isOpenAiKeyMask(val: string | null | undefined): boolean {
+  if (!val || typeof val !== "string") return false;
+  return val.includes("...") && val.length < 50;
+}
+
 /** Секретные поля интеграций: не отправляем при сохранении, если пользователь их не редактировал (защита от перезаписи автозаполнением/маской). */
 const SENSITIVE_INTEGRATION_KEYS = new Set([
   "openai_api_key",
@@ -297,14 +303,17 @@ export default function Settings() {
             Регистрация и ключ: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">platform.openai.com/api-keys</a>
           </p>
           <div className="flex gap-2 items-start mb-2">
+            {isOpenAiKeyMask(integrations.openai_api_key) && (
+              <p className="text-slate-500 text-sm mb-1 w-full">Ключ сохранён ({integrations.openai_api_key}). Введите новый ключ для замены или проверки.</p>
+            )}
             <input
-              value={integrations.openai_api_key ?? ""}
+              value={isOpenAiKeyMask(integrations.openai_api_key) ? "" : (integrations.openai_api_key ?? "")}
               onChange={(e) => {
                 setIntegrations((p) => ({ ...p, openai_api_key: e.target.value }));
                 markSensitiveEdited("openai_api_key");
                 setOpenaiTestStatus(null);
               }}
-              placeholder="sk-..."
+              placeholder={isOpenAiKeyMask(integrations.openai_api_key) ? "Введите новый ключ для замены" : "sk-..."}
               type="password"
               className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500"
             />
@@ -314,6 +323,10 @@ export default function Settings() {
                 const key = (integrations.openai_api_key ?? "").trim();
                 if (!key) {
                   toast.error("Введите API ключ");
+                  return;
+                }
+                if (isOpenAiKeyMask(key)) {
+                  toast.error("В поле маска сохранённого ключа. Введите полный ключ для проверки.");
                   return;
                 }
                 setOpenaiTestStatus("checking");
@@ -330,7 +343,7 @@ export default function Settings() {
                     toast.error(e?.response?.data?.detail ?? "Ошибка запроса");
                   });
               }}
-              disabled={openaiTestStatus === "checking" || !(integrations.openai_api_key ?? "").trim()}
+              disabled={openaiTestStatus === "checking" || !(integrations.openai_api_key ?? "").trim() || isOpenAiKeyMask(integrations.openai_api_key)}
               className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white text-sm whitespace-nowrap"
             >
               {openaiTestStatus === "checking" ? "Проверка…" : "Проверить"}
