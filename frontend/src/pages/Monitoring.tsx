@@ -138,8 +138,8 @@ function ServerMonitorCard({ server, period }: { server: Server; period: string 
                 <Tooltip
                   contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #475569" }}
                   labelFormatter={(_, payload) => payload?.[0]?.payload?.full ?? ""}
-                  formatter={(value: number, name: string) => [
-                    name === "load" ? value.toFixed(2) : `${value}%`,
+                  formatter={(value, name) => [
+                    name === "load" ? (Number(value) ?? 0).toFixed(2) : `${Number(value) ?? 0}%`,
                     name === "load" ? "Load (1m)" : name === "mem" ? "RAM" : "Диск",
                   ]}
                 />
