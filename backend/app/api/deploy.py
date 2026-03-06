@@ -432,3 +432,11 @@ async def batch_deploy_cancel(task_id: str, current_user: CurrentUser):
     from app.services.batch_deploy_state import update_state
     await asyncio.to_thread(update_state, task_id, status="cancelled")
     return {"status": "cancelled"}
+
+
+@router.post("/batch/{task_id}/dismiss")
+async def batch_deploy_dismiss(task_id: str, current_user: CurrentUser):
+    """Убрать задачу из списка процессов (не отменяет выполнение, просто скрывает из списка)."""
+    from app.services.batch_deploy_state import remove_user_task
+    await asyncio.to_thread(remove_user_task, current_user.id, task_id)
+    return {"status": "ok"}

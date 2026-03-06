@@ -1500,12 +1500,14 @@ export default function Doorways() {
                         <>
                           <Button variant="secondary" size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/pause`); refetchProcessStatus(); }}>Пауза</Button>
                           <Button variant="destructive" size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/cancel`); refetchProcessStatus(); }}>Отменить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/deploy/batch/${openProcess.task_id}/cancel`); } catch {} try { await api.post(`/deploy/batch/${openProcess.task_id}/dismiss`); } catch {} removeDeployTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
                         </>
                       )}
                       {processStatus.status === "paused" && (
                         <>
                           <Button size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/resume`); refetchProcessStatus(); }}>Продолжить</Button>
                           <Button variant="destructive" size="sm" onClick={async () => { await api.post(`/deploy/batch/${openProcess.task_id}/cancel`); refetchProcessStatus(); }}>Отменить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/deploy/batch/${openProcess.task_id}/cancel`); } catch {} try { await api.post(`/deploy/batch/${openProcess.task_id}/dismiss`); } catch {} removeDeployTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
                         </>
                       )}
                       {(processStatus.status === "completed" || processStatus.status === "cancelled") && (
@@ -1518,7 +1520,10 @@ export default function Doorways() {
                     {processStatusError ? (
                       <div className="py-4">
                         <p className="text-amber-400 mb-2">Не удалось загрузить статус. Задача может ещё выполняться на сервере.</p>
-                        <Button variant="secondary" size="sm" onClick={() => refetchProcessStatus()}>Повторить</Button>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button variant="secondary" size="sm" onClick={() => refetchProcessStatus()}>Повторить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/deploy/batch/${openProcess.task_id}/cancel`); } catch {} try { await api.post(`/deploy/batch/${openProcess.task_id}/dismiss`); } catch {} removeDeployTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
+                        </div>
                       </div>
                     ) : (
                       <p className="text-slate-400">Загрузка статуса…</p>
@@ -1562,13 +1567,28 @@ export default function Doorways() {
                     </div>
                     {processStatus.error && <p className="text-red-400 text-sm mt-2">{processStatus.error}</p>}
                     <div className="pt-4 flex gap-2">
+                      {processStatus.status === "running" && (
+                        <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/generate-batch/${openProcess.task_id}/dismiss`); } catch {} removeGenerateTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
+                      )}
                       {processStatus.status === "completed" && (
                         <Button variant="secondary" onClick={() => { removeGenerateTaskId(openProcess.task_id); setOpenProcess(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}>Закрыть</Button>
                       )}
                     </div>
                   </>
                 ) : (
-                  <p className="text-slate-400">Загрузка статуса…</p>
+                  <>
+                    {processStatusError ? (
+                      <div className="py-4">
+                        <p className="text-amber-400 mb-2">Не удалось загрузить статус.</p>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button variant="secondary" size="sm" onClick={() => refetchProcessStatus()}>Повторить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/generate-batch/${openProcess.task_id}/dismiss`); } catch {} removeGenerateTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400">Загрузка статуса…</p>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -1607,13 +1627,28 @@ export default function Doorways() {
                     </div>
                     {processStatus.error && <p className="text-red-400 text-sm mt-2">{processStatus.error}</p>}
                     <div className="pt-4 flex gap-2">
+                      {processStatus.status === "running" && (
+                        <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/batch-delete/${openProcess.task_id}/dismiss`); } catch {} removeDeleteTaskId(openProcess.task_id); setOpenProcess(null); setSelectedDoorwayIds(new Set()); }}>Убрать из списка</Button>
+                      )}
                       {processStatus.status === "completed" && (
                         <Button variant="secondary" onClick={() => { removeDeleteTaskId(openProcess.task_id); setOpenProcess(null); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); }}>Закрыть</Button>
                       )}
                     </div>
                   </>
                 ) : (
-                  <p className="text-slate-400">Загрузка статуса…</p>
+                  <>
+                    {processStatusError ? (
+                      <div className="py-4">
+                        <p className="text-amber-400 mb-2">Не удалось загрузить статус.</p>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button variant="secondary" size="sm" onClick={() => refetchProcessStatus()}>Повторить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/batch-delete/${openProcess.task_id}/dismiss`); } catch {} removeDeleteTaskId(openProcess.task_id); setOpenProcess(null); setSelectedDoorwayIds(new Set()); }}>Убрать из списка</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400">Загрузка статуса…</p>
+                    )}
+                  </>
                 )}
               </>
             )}

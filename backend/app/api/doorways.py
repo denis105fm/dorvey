@@ -214,6 +214,15 @@ async def generate_batch_status(
     }
 
 
+@router.post("/generate-batch/{task_id}/dismiss")
+async def generate_batch_dismiss(task_id: str, current_user: CurrentUser):
+    """Убрать задачу из списка процессов."""
+    import asyncio
+    from app.services.generate_batch_state import remove_user_task
+    await asyncio.to_thread(remove_user_task, current_user.id, task_id)
+    return {"status": "ok"}
+
+
 @router.post("/", response_model=DoorwayResponse)
 async def create_doorway(
     data: DoorwayCreate,
@@ -565,6 +574,15 @@ async def batch_delete_status(
         "error": state.get("error"),
         "results": state.get("results") or [],
     }
+
+
+@router.post("/batch-delete/{task_id}/dismiss")
+async def batch_delete_dismiss(task_id: str, current_user: CurrentUser):
+    """Убрать задачу из списка процессов."""
+    import asyncio
+    from app.services.delete_batch_state import remove_user_task
+    await asyncio.to_thread(remove_user_task, current_user.id, task_id)
+    return {"status": "ok"}
 
 
 @router.get("/active-batch-tasks")
