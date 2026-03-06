@@ -157,7 +157,7 @@ export default function Doorways() {
       return d && (d.status === "running" || d.status === "paused") ? 2500 : false;
     },
   });
-  const { data: batchGenerateStatus, refetch: refetchBatchGenerateStatus } = useQuery({
+  const { data: batchGenerateStatus } = useQuery({
     queryKey: ["generate-batch-status", batchGenerateTaskId],
     queryFn: () => api.get(`/doorways/generate-batch/${batchGenerateTaskId}/status`).then((r) => r.data as { task_id: string; status: string; total: number; current_index: number; created?: number; error?: string; results: Array<{ keyword: string; geo: string; status: string; error?: string; doorway_id?: number }> }),
     enabled: !!batchGenerateTaskId,
