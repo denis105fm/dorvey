@@ -13,6 +13,7 @@ type Campaign = {
   region: string;
   currency: string;
   status: string;
+  is_black?: boolean;
 };
 
 const COUNTRY_PRESETS: Record<string, { language: string; locale: string; region: string; currency: string }> = {
@@ -46,7 +47,7 @@ export default function Campaigns() {
   const [showActionsHelp, setShowActionsHelp] = useState(false);
   const [rulesForm, setRulesForm] = useState<Record<string, unknown> | null>(null);
   const rulesSyncedForCampaignIdRef = useRef<number | null>(null);
-  const [form, setForm] = useState({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" });
+  const [form, setForm] = useState({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active", is_black: false });
   const [convForm, setConvForm] = useState({
     urgency_text: "",
     social_stats: "",
@@ -126,7 +127,7 @@ export default function Campaigns() {
 
   const createMut = useMutation({
     mutationFn: (d: typeof form) => api.post("/campaigns/", d).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); setModal(null); setForm({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" }); toast.success("Кампания создана"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); setModal(null); setForm({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active", is_black: false }); toast.success("Кампания создана"); },
   });
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<typeof form> }) => api.patch(`/campaigns/${id}`, data).then((r) => r.data),
@@ -206,7 +207,7 @@ export default function Campaigns() {
 
   const openEdit = (c: Campaign) => {
     setEdit(c);
-    setForm({ name: c.name, affiliate_url: c.affiliate_url ?? "", language: c.language, locale: c.locale, region: c.region, currency: c.currency, status: c.status });
+    setForm({ name: c.name, affiliate_url: c.affiliate_url ?? "", language: c.language, locale: c.locale, region: c.region, currency: c.currency, status: c.status, is_black: c.is_black ?? false });
     setModal("edit");
   };
 
@@ -214,7 +215,7 @@ export default function Campaigns() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-white">Кампании</h1>
-        <button onClick={() => { setModal("create"); setForm({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active" }); }}
+        <button onClick={() => { setModal("create"); setForm({ name: "", affiliate_url: "", language: "ru", locale: "ru-RU", region: "RU", currency: "RUB", status: "active", is_black: false }); }}
           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium">
           Добавить кампанию
         </button>
@@ -261,7 +262,10 @@ export default function Campaigns() {
                   {campaigns.map((c: Campaign) => (
                     <tr key={c.id} className="border-b border-slate-700/50 hover:bg-slate-700/30">
                       <td className="px-4 py-3 text-white">{c.id}</td>
-                      <td className="px-4 py-3 text-white">{c.name}</td>
+                      <td className="px-4 py-3 text-white">
+                        {c.name}
+                        {c.is_black && <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-slate-600 text-amber-400 border border-amber-500/50">чёрные</span>}
+                      </td>
                       <td className="px-4 py-3 text-slate-400">{c.language}</td>
                       <td className="px-4 py-3 text-slate-400">{c.region}</td>
                       <td className="px-4 py-3">
@@ -627,6 +631,10 @@ export default function Campaigns() {
                 <option value="active">active</option>
                 <option value="paused">paused</option>
               </select>
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input type="checkbox" checked={form.is_black} onChange={(e) => setForm((f) => ({ ...f, is_black: e.target.checked }))} className="rounded border-slate-600 bg-slate-700 text-amber-500" />
+                Чёрные дорвеи (отдельный сервер, другой тон генерации)
+              </label>
             </div>
             <div className="flex justify-end gap-2 mt-4 shrink-0">
               <button onClick={() => { setModal(null); setEdit(null); }} className="px-4 py-2 bg-slate-600 rounded-lg text-white">Отмена</button>

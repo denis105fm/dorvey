@@ -121,8 +121,14 @@ export default function Domains() {
                 <label className="block text-slate-400 text-sm mb-1">Кампания</label>
                 <select value={form.campaign_id} onChange={(e) => setForm((f) => ({ ...f, campaign_id: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
                   <option value="">— не выбрана</option>
-                  {campaigns?.map((c: { id: number; name: string }) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {campaigns?.map((c: { id: number; name: string; is_black?: boolean }) => (
+                    <option key={c.id} value={c.id}>{c.name}{c.is_black ? " (чёрные)" : ""}</option>
+                  ))}
                 </select>
+                {modal === "create" && (() => {
+                  const camp = campaigns?.find((c: { id: number; is_black?: boolean }) => c.id === Number(form.campaign_id));
+                  return camp?.is_black ? <p className="text-amber-400 text-xs mt-1">Чёрная кампания — выберите отдельный сервер для чёрных дорвеев.</p> : null;
+                })()}
               </div>
               <div>
                 <label className="block text-slate-400 text-sm mb-1">Статус</label>

@@ -155,8 +155,11 @@ async def generate_doorway(
         affiliate_url=camp.affiliate_url,
         forbidden_words=forbidden or None,
         external_context=external_context,
+        is_black=getattr(camp, "is_black", False),
         api_key_override=user_openai_key,
     )
+
+    # Чёрные дорвеи: seo_tail не добавляем в content — храним в cloaking_rules и подставляем только в бот-версии (prepare_doorway_html for_bot=True).
 
     ok, violations = validate_content(
         data.get("content", "") + data.get("title", "") + data.get("meta_description", ""),

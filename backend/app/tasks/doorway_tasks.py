@@ -19,10 +19,17 @@ def generate_doorway_async(campaign_id: int, domain_id: int, keyword: str, path:
             result = await generate_doorway(
                 db, campaign_id=campaign_id, domain_id=domain_id, keyword=keyword, path=path
             )
+            cloaking = {}
+            from sqlalchemy import select
+            from app.models.campaign import Campaign
+            camp = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
+            if camp and getattr(camp, "is_black", False) and result.get("seo_tail"):
+                cloaking["seo_tail"] = (result.get("seo_tail") or "").strip()[:500]
             dw = Doorway(
                 campaign_id=campaign_id, domain_id=domain_id, path=path,
                 title=result.get("title"), content=result.get("content"),
                 meta_description=result.get("meta_description"), status="draft",
+                cloaking_rules=cloaking if cloaking else None,
             )
             db.add(dw)
             await db.flush()
@@ -236,7 +243,7 @@ def deploy_batch_with_stagger(
                 update_state(task_id, current_index=i, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
                 results[i]["status"] = "deploying"
                 update_state(task_id, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])
-                sleep_for_stagger(i, total, cfg)
+                sleep_for_stagger(i, total, stagger_cfg)
                 if check_pause_cancel():
                     break
                 html = await prepare_doorway_html(db, dw_id, for_bot=False)
@@ -490,6 +497,8 @@ def generate_batch_async(
                         if gen_result.get("quiz_questions"):
                             cloaking["quiz"] = {"enabled": True, "questions": gen_result["quiz_questions"]}
                         camp = (await db.execute(select(Campaign).where(Campaign.id == item["campaign_id"]))).scalar_one_or_none()
+                        if camp and getattr(camp, "is_black", False) and gen_result.get("seo_tail"):
+                            cloaking["seo_tail"] = (gen_result.get("seo_tail") or "").strip()[:500]
                         preferred_layout = None
                         if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
                             preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")
@@ -747,10 +756,15 @@ def auto_generate_from_keywords(max_per_run: int = 20):
                             result = await generate_doorway(
                                 db, campaign_id=camp_id, domain_id=domain_id, keyword=kw_text, path=path
                             )
+                            cloaking = {}
+                            camp = (await db.execute(select(Campaign).where(Campaign.id == camp_id))).scalar_one_or_none()
+                            if camp and getattr(camp, "is_black", False) and result.get("seo_tail"):
+                                cloaking["seo_tail"] = (result.get("seo_tail") or "").strip()[:500]
                             dw = Doorway(
                                 campaign_id=camp_id, domain_id=domain_id, path=path,
                                 title=result.get("title"), content=result.get("content"),
                                 meta_description=result.get("meta_description"), status="draft",
+                                cloaking_rules=cloaking if cloaking else None,
                             )
                             db.add(dw)
                             await db.flush()

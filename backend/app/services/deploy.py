@@ -677,6 +677,8 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     domain = dom.domain or ""
     path = (dw.path or "/").strip() or "/"
     schema_variant = get_schema_variant(domain, path, dw.id)
+    if for_bot and getattr(camp, "is_black", False):
+        schema_variant = "webpage"  # один тип схемы — меньше паттерн для детекта
     title = dw.title or dom.domain
     desc = dw.meta_description or ""
     schemas = []
@@ -719,7 +721,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
 
     internal_links = await get_internal_links_suggestions(db, doorway_id, camp.id, max_links=3)
     internal_links_block = None
-    if internal_links:
+    if internal_links and not (for_bot and getattr(camp, "is_black", False)):
         il_heading = ui.get("internal_links_heading", "Related topics")
         parts_il = [f'<h2>{html.escape(il_heading)}</h2><ul class="internal-links-list">']
         for link in internal_links:
@@ -843,6 +845,17 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
                 data_questions_esc = html.escape(data_questions_json)
                 quiz_block = f'''<div id="dv-quiz" class="dv-quiz" data-questions="{data_questions_esc}" data-cta-url="{cta_esc}" data-title="{q_title}" data-submit="{q_submit}"><h2>{q_title}</h2><div class="dv-quiz-question"><p id="dv-quiz-q"></p><div class="dv-quiz-options" id="dv-quiz-opts"></div><div class="dv-quiz-nav"><a id="dv-quiz-cta" href="{cta_esc}" class="cta" rel="nofollow" style="display:none">{q_submit}</a></div></div></div><script>(function(){{var el=document.getElementById("dv-quiz");if(!el)return;var q=JSON.parse(el.getAttribute("data-questions"));var idx=0;var qEl=document.getElementById("dv-quiz-q");var optsEl=document.getElementById("dv-quiz-opts");var ctaLink=document.getElementById("dv-quiz-cta");function show(){{if(idx>=q.length){{optsEl.innerHTML="";ctaLink.style.display="inline-block";return;}}var item=q[idx];qEl.textContent=item.question;optsEl.innerHTML="";item.options.forEach(function(opt){{var b=document.createElement("button");b.type="button";b.textContent=opt;b.onclick=function(){{idx++;show();}};optsEl.appendChild(b);}});}}show();}})();</script>'''
 
+    content_for_render = dw.content or ""
+    if for_bot:
+        seo_tail = (dw.cloaking_rules or {}).get("seo_tail")
+        if isinstance(seo_tail, str) and seo_tail.strip():
+            tail_esc = seo_tail.strip()[:500].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            content_for_render = content_for_render + (
+                '<div class="dv-related-topics" style="margin-top:2rem;padding-top:1rem;border-top:1px solid #e5e7eb;'
+                'font-size:0.7rem;line-height:1.5;color:#94a3b8;">'
+                f'{tail_esc}</div>'
+            )
+
     if for_bot:
         hotjar_id = clarity_id = fb_pixel = ga_id = None
         exit_intent = False
@@ -852,7 +865,7 @@ async def prepare_doorway_html(db: AsyncSession, doorway_id: int, for_bot: bool 
     return render_doorway_page(
         title=title,
         meta_description=desc,
-        content=dw.content or "",
+        content=content_for_render,
         language=camp_lang,
         affiliate_url=cta_href,
         canonical_url=canonical,

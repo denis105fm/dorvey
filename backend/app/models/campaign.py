@@ -1,7 +1,7 @@
 """Campaign model."""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -21,6 +21,7 @@ class Campaign(Base):
     region = Column(String(10), default="RU")
     currency = Column(String(5), default="RUB")
     status = Column(String(20), default="active")
+    is_black = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

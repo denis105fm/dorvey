@@ -15,6 +15,7 @@ class CampaignBase(BaseModel):
     region: str = "RU"
     currency: str = "RUB"
     status: str = "active"
+    is_black: bool = False
 
 
 class CampaignCreate(CampaignBase):
@@ -30,6 +31,7 @@ class CampaignUpdate(BaseModel):
     region: Optional[str] = None
     currency: Optional[str] = None
     status: Optional[str] = None
+    is_black: Optional[bool] = None
 
 
 class CampaignResponse(CampaignBase):

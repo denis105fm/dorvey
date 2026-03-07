@@ -108,6 +108,8 @@ async def generate_doorway_content(
             if result.get("quiz_questions"):
                 cloaking["quiz"] = {"enabled": True, "questions": result["quiz_questions"]}
             camp = (await db.execute(select(Campaign).where(Campaign.id == data.campaign_id))).scalar_one_or_none()
+            if camp and getattr(camp, "is_black", False) and result.get("seo_tail"):
+                cloaking["seo_tail"] = (result.get("seo_tail") or "").strip()[:500]
             preferred_layout = None
             if camp and camp.affiliate_rules and isinstance(camp.affiliate_rules.get("ai"), dict):
                 preferred_layout = camp.affiliate_rules["ai"].get("preferred_layout_index")

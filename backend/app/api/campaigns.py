@@ -232,6 +232,9 @@ async def auto_create_campaign_from_offers(
                 try:
                     gen = await generate_doorway(db, campaign_id=campaign.id, domain_id=dom.id, keyword=item["keyword"], path=path)
                     if gen:
+                        cloaking = {}
+                        if getattr(camp, "is_black", False) and gen.get("seo_tail"):
+                            cloaking["seo_tail"] = (gen.get("seo_tail") or "").strip()[:500]
                         dw = Doorway(
                             campaign_id=campaign.id,
                             domain_id=dom.id,
@@ -240,6 +243,7 @@ async def auto_create_campaign_from_offers(
                             content=gen.get("content"),
                             meta_description=gen.get("meta_description"),
                             status="draft",
+                            cloaking_rules=cloaking if cloaking else None,
                             layout_index=preferred_layout,
                         )
                         db.add(dw)

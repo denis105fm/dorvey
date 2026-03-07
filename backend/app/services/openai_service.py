@@ -41,6 +41,7 @@ class OpenAIService:
         forbidden_words: Optional[list[str]] = None,
         external_context: Optional[str] = None,
         tone: str = "informative",
+        is_black: bool = False,
         api_key_override: Optional[str] = None,
     ) -> dict[str, str]:
         """Generate title, meta_description, and content for doorway."""
@@ -48,6 +49,19 @@ class OpenAIService:
         forbidden_str = ""
         if forbidden_words:
             forbidden_str = f"\n\nЗАПРЕЩЕНО использовать: {', '.join(forbidden_words)}"
+
+        black_hint = ""
+        if is_black:
+            black_hint = """
+
+Режим чёрных дорвеев (максимальный охват поиска, но чтобы жили дольше — не палиться ботам):
+- Контент для поисковика остаётся информативным и естественным. Избегай шаблонов: разная длина предложений и абзацев, вариативность формулировок, мягкое использование LSI-слов и синонимов в тексте — так сложнее детектить.
+- Допустимы более жёсткие призывы к действию и акцент на выгоду для пользователя. Для поиска — полезный текст; для конверсии — чёткий CTA.
+- ОБЯЗАТЕЛЬНО добавь поле "seo_tail" в JSON: одна строка (до 400 символов) с 15–25 семантическими вариациями и длиннохвостыми запросами по теме. Формат: естественная фраза или перечисление через запятую/точку с запятой, как блок «похожие темы» или «ещё по теме». Не дублируй основной ключ дословно — только синонимы, смежные запросы, длинный хвост. Цель — усилить охват в поиске без явного переспама. Пример тона: «Также в разделе: запрос 1, запрос 2, запрос 3»."""
+
+        json_fields = '{"title": "...", "meta_description": "...", "content": "..."}'
+        if is_black:
+            json_fields = '{"title": "...", "meta_description": "...", "content": "...", "seo_tail": "похожие темы: вариация1, вариация2, ..."}'
 
         system_prompt = f"""Ты — профессиональный SEO-копирайтер. Создаёшь ценный контент для лендинга.
 Язык: {language}. Регион: {region}. Стиль: {tone}.
@@ -58,8 +72,9 @@ class OpenAIService:
 - content: валидный HTML. <p>, <h1>. Без лишних div
 {forbidden_str}
 Если в запросе пользователя дан контекст по региону (сезонность, актуальные темы) — можешь мягко учесть в заголовке или в одном предложении в тексте. Не перегружай: одно упоминание или тон достаточно. Контент должен оставаться про ключевой запрос.
+{black_hint}
 
-Ответ — только валидный JSON: {{"title": "...", "meta_description": "...", "content": "..."}}"""
+Ответ — только валидный JSON: {json_fields}"""
 
         user_prompt = f'Ключевой запрос: "{keyword}"'
         if affiliate_url:
@@ -73,20 +88,26 @@ class OpenAIService:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.6,
+            temperature=0.75 if is_black else 0.6,
         )
         text = (response.choices[0].message.content or "{}").strip()
         if text.startswith("```"):
             parts = text.split("```")
             text = parts[1][4:] if parts[1].startswith("json") else parts[1]
         try:
-            return json.loads(text)
+            out = json.loads(text)
+            if is_black and isinstance(out, dict) and out.get("seo_tail"):
+                out["seo_tail"] = str(out["seo_tail"]).strip()[:500]
+            return out
         except json.JSONDecodeError:
-            return {
+            result = {
                 "title": f"{keyword} | Лучшие предложения",
                 "meta_description": f"Узнайте о {keyword}. Выгодные условия.",
                 "content": f"<h1>{keyword}</h1><p>Информация по запросу {keyword}.</p>",
             }
+            if is_black:
+                result["seo_tail"] = ""
+            return result
 
     async def generate_faq(
         self,
