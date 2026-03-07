@@ -237,6 +237,14 @@ def deploy_batch_with_stagger(
         engine = create_async_engine(settings.DATABASE_URL)
         async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with async_session() as db:
+            stagger_cfg = cfg
+            if doorway_ids:
+                r0 = await db.execute(
+                    select(Campaign).join(Doorway, Doorway.campaign_id == Campaign.id).where(Doorway.id == doorway_ids[0])
+                )
+                camp0 = r0.scalar_one_or_none()
+                if camp0 and getattr(camp0, "is_black", False):
+                    stagger_cfg = StaggerConfig(min_delay_sec=60, max_delay_sec=300)
             for i, dw_id in enumerate(doorway_ids):
                 if check_pause_cancel():
                     break
