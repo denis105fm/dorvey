@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Server as ServerIcon } from "lucide-react";
@@ -98,9 +99,9 @@ export default function Servers() {
         </div>
       )}
 
-      {modal && (
-        <div className="fixed inset-0 bg-black/60 flex justify-center items-start overflow-y-auto z-50 py-6" onClick={() => { setModal(null); setEdit(null); }}>
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4 min-h-0 max-h-[calc(100vh-3rem)] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      {modal && createPortal(
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-start overflow-y-auto z-[100] py-6" onClick={() => { setModal(null); setEdit(null); }}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4 min-h-0 max-h-[calc(100vh-3rem)] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-medium text-white mb-4 shrink-0">{modal === "create" ? "Новый сервер" : "Редактировать сервер"}</h2>
             <div className="space-y-3 overflow-y-auto min-h-0">
               <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Название" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
@@ -130,7 +131,8 @@ export default function Servers() {
               <button onClick={() => modal === "create" ? createMut.mutate(form) : edit && updateMut.mutate({ id: edit.id, data: form })} disabled={!form.name || !form.host || !form.user || createMut.isPending || updateMut.isPending} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white">Сохранить</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
