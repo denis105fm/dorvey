@@ -23,7 +23,7 @@ export default function Domains() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["domains"] }); setModal(null); resetForm(); },
   });
   const updateMut = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { campaign_id?: number | null; status?: string } }) => api.patch(`/domains/${id}`, data).then((r) => r.data),
+    mutationFn: ({ id, data }: { id: number; data: { server_id?: number; campaign_id?: number | null; status?: string } }) => api.patch(`/domains/${id}`, data).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["domains"] }); setModal(null); setEdit(null); },
   });
   const deleteMut = useMutation({
@@ -109,14 +109,12 @@ export default function Domains() {
               {modal === "create" && (
                 <input value={form.domain} onChange={(e) => setForm((f) => ({ ...f, domain: e.target.value }))} placeholder="example.com" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               )}
-              {modal === "create" && (
-                <div>
-                  <label className="block text-slate-400 text-sm mb-1">Сервер</label>
-                  <select value={form.server_id} onChange={(e) => setForm((f) => ({ ...f, server_id: Number(e.target.value) }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
-                    {servers?.map((s: { id: number; name: string }) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Сервер</label>
+                <select value={form.server_id} onChange={(e) => setForm((f) => ({ ...f, server_id: Number(e.target.value) }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
+                  {servers?.map((s: { id: number; name: string }) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
               <div>
                 <label className="block text-slate-400 text-sm mb-1">Кампания</label>
                 <select value={form.campaign_id} onChange={(e) => setForm((f) => ({ ...f, campaign_id: e.target.value }))} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
@@ -144,7 +142,7 @@ export default function Domains() {
               <button
                 onClick={() => modal === "create"
                   ? createMut.mutate(createPayload())
-                  : edit && updateMut.mutate({ id: edit.id, data: { campaign_id: form.campaign_id ? Number(form.campaign_id) : null, status: form.status } })}
+                  : edit && updateMut.mutate({ id: edit.id, data: { server_id: form.server_id, campaign_id: form.campaign_id ? Number(form.campaign_id) : null, status: form.status } })}
                 disabled={(modal === "create" && !form.domain) || createMut.isPending || updateMut.isPending}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white"
               >

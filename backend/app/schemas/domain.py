@@ -18,6 +18,7 @@ class DomainCreate(DomainBase):
 
 
 class DomainUpdate(BaseModel):
+    server_id: Optional[int] = None
     campaign_id: Optional[int] = None
     status: Optional[str] = None
 
