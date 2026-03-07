@@ -1,5 +1,7 @@
 # Деплой через GitHub Actions
 
+> **Серверы для дорвеев (VPS):** настройка Ubuntu + Nginx под хостинг статики дорвеев — в [DOORWAY_SERVER_SETUP.md](DOORWAY_SERVER_SETUP.md). Инструкция общая для всех таких серверов.
+
 ## Требуемые GitHub Secrets
 
 | Secret | Описание |

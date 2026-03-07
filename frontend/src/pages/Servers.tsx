@@ -99,10 +99,10 @@ export default function Servers() {
       )}
 
       {modal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { setModal(null); setEdit(null); }}>
-          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-medium text-white mb-4">{modal === "create" ? "Новый сервер" : "Редактировать сервер"}</h2>
-            <div className="space-y-3">
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-start overflow-y-auto z-50 py-6" onClick={() => { setModal(null); setEdit(null); }}>
+          <div className="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-lg w-full mx-4 min-h-0 max-h-[calc(100vh-3rem)] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-medium text-white mb-4 shrink-0">{modal === "create" ? "Новый сервер" : "Редактировать сервер"}</h2>
+            <div className="space-y-3 overflow-y-auto min-h-0">
               <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Название" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <input value={form.host} onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))} placeholder="Хост" className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <div className="grid grid-cols-2 gap-3">
@@ -117,7 +117,7 @@ export default function Servers() {
               <input value={form.auth_data} onChange={(e) => setForm((f) => ({ ...f, auth_data: e.target.value }))} placeholder={form.auth_type === "password" ? "Пароль" : "Ключ (опц.)"} type={form.auth_type === "password" ? "password" : "text"} className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white" />
               <label className="flex items-center gap-2 text-slate-300"><input type="checkbox" checked={form.ssl_auto} onChange={(e) => setForm((f) => ({ ...f, ssl_auto: e.target.checked }))} />Авто SSL</label>
             </div>
-            <div className="flex justify-end gap-2 mt-4 flex-wrap">
+            <div className="flex justify-end gap-2 mt-4 flex-wrap shrink-0">
               <button
                 type="button"
                 onClick={() => testConnMut.mutate({ host: form.host, port: form.port, user: form.user, auth_type: form.auth_type, auth_data: form.auth_data })}
