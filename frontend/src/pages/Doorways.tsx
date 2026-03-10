@@ -1158,6 +1158,9 @@ export default function Doorways() {
                             {canDeploy && (
                               <DropdownMenuItem onClick={() => setDeployDoorwayId(d.id)}>Деплой</DropdownMenuItem>
                             )}
+                            {(d.status === "deployed" || d.status === "indexed") && (
+                              <DropdownMenuItem onClick={() => setDeployDoorwayId(d.id)}>Повторный деплой</DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => runSslMut.mutate(d.id)} disabled={runSslMut.isPending}>
                               {runSslMut.isPending ? "SSL…" : "Получить SSL"}
                             </DropdownMenuItem>
