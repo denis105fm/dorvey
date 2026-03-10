@@ -14,7 +14,7 @@ from app.models.campaign import Campaign
 from app.models.domain import Domain
 from app.models.setting import Setting
 from app.models.server import Server
-from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl, deploy_sitemap_robots_sync, deploy_indexnow_key_sync
+from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl, deploy_sitemap_robots_sync, deploy_indexnow_key_sync, deploy_root_index_redirect
 from app.services.indexing import get_doorway_url, generate_sitemap_xml, generate_robots_txt
 
 router = APIRouter()
@@ -117,6 +117,47 @@ async def doorway_ssl(
     if ssl_ok:
         return {"status": "ok", "message": ssl_msg or "SSL сертификат получен, Nginx настроен на 443"}
     raise HTTPException(status_code=500, detail=ssl_msg or "Certbot failed")
+
+
+@router.post("/domain/{domain_id}/fix-root")
+async def fix_domain_root(
+    domain_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Положить в корень домена index.html с редиректом на первый путь дорвея.
+    Нужно, если все дорвеи на путях типа /en/... и открытие домена даёт 404.
+    """
+    r = await db.execute(
+        select(Domain, Server)
+        .join(Server, Domain.server_id == Server.id)
+        .where(Domain.id == domain_id)
+    )
+    row = r.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    dom, srv = row
+    r2 = await db.execute(
+        select(Doorway.path)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.domain_id == domain_id, Campaign.user_id == current_user.id)
+    )
+    paths = [(p or "/").strip() or "/" for (p,) in r2.all()]
+    if not paths:
+        raise HTTPException(status_code=400, detail="Нет дорвеев на этом домене")
+    if "/" in paths:
+        return {"status": "ok", "message": "В корне уже есть дорвей"}
+    first_path = sorted(paths)[0]
+    ok, msg = await asyncio.to_thread(
+        deploy_root_index_redirect,
+        srv,
+        first_path,
+        srv.path or "/var/www/html",
+    )
+    if ok:
+        return {"status": "ok", "message": f"В корень положен редирект на {first_path}"}
+    raise HTTPException(status_code=500, detail=msg or "Ошибка деплоя")
 
 
 @router.post("/doorway/{doorway_id}")

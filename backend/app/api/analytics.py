@@ -3,9 +3,9 @@
 import json
 from datetime import datetime, timedelta
 from typing import List
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode, quote, quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +35,50 @@ from app.schemas.analytics import (
 )
 
 router = APIRouter()
+
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    if request.client:
+        return request.client.host or ""
+    return ""
+
+
+def _device_from_ua(user_agent: str) -> str:
+    if not user_agent:
+        return "—"
+    ua = user_agent.lower()
+    if ("mobile" in ua and "ipad" not in ua) or ("android" in ua and "mobile" in ua):
+        return "mobile"
+    if "tablet" in ua or "ipad" in ua:
+        return "tablet"
+    return "desktop"
+
+
+async def _country_from_ip(ip: str) -> str | None:
+    if not ip or ip.startswith("127.") or ip == "::1" or ip.startswith("10.") or ip.startswith("192.168.") or ip.startswith("172."):
+        return None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            r = await client.get(f"http://ip-api.com/json/{ip}?fields=countryCode")
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("countryCode") or None
+    except Exception:
+        pass
+    return None
+
+
+def _ip_display(ip: str) -> str:
+    if not ip:
+        return "—"
+    parts = ip.replace(":", ".").split(".")
+    if len(parts) >= 4:
+        return ".".join(["*"] * (len(parts) - 2) + parts[-2:])
+    return "***"
 
 
 async def _check_doorway_access(db: AsyncSession, doorway_id: int, user_id: int) -> bool:
@@ -282,6 +326,7 @@ _PIXEL_GIF = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x
 
 @router.get("/visit")
 async def visit_pixel(
+    request: Request,
     dw: int = Query(..., alias="dw", description="doorway_id"),
     vid: str | None = Query(None, alias="vid", description="visitor_id from localStorage"),
     db: AsyncSession = Depends(get_db),
@@ -294,7 +339,13 @@ async def visit_pixel(
         r = await db.execute(select(Doorway).where(Doorway.id == dw))
         door = r.scalar_one_or_none()
         if door:
-            ev = VisitorEvent(visitor_id=vid, doorway_id=dw, campaign_id=door.campaign_id, event_type="visit")
+            ip = _client_ip(request)
+            ua = request.headers.get("user-agent") or ""
+            meta = {"ip": ip, "user_agent": ua[:500], "device": _device_from_ua(ua)}
+            country = await _country_from_ip(ip)
+            if country:
+                meta["country"] = country
+            ev = VisitorEvent(visitor_id=vid, doorway_id=dw, campaign_id=door.campaign_id, event_type="visit", meta=meta)
             db.add(ev)
             await db.commit()
     return Response(content=_PIXEL_GIF, media_type="image/gif")
@@ -442,6 +493,7 @@ class PushSubscribeRequest(BaseModel):
 
 @router.post("/push-subscribe")
 async def push_subscribe(
+    request: Request,
     data: PushSubscribeRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -463,11 +515,18 @@ async def push_subscribe(
         subscription=data.subscription,
     )
     db.add(sub)
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent") or ""
+    meta = {"ip": ip, "user_agent": ua[:500], "device": _device_from_ua(ua)}
+    country = await _country_from_ip(ip)
+    if country:
+        meta["country"] = country
     ev = VisitorEvent(
         visitor_id=data.visitor_id,
         doorway_id=data.doorway_id,
         campaign_id=dw.campaign_id,
         event_type="push_subscribe",
+        meta=meta,
     )
     db.add(ev)
     await db.commit()
@@ -503,6 +562,41 @@ async def email_capture(
     db.add(lead)
     await db.commit()
     return {"status": "ok"}
+
+
+@router.get("/track-and-redirect")
+async def track_and_redirect(
+    request: Request,
+    vid: str = Query(..., description="visitor_id"),
+    to: str = Query(..., description="URL to redirect to"),
+    dw: int = Query(..., description="doorway_id"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Пинг: по ссылке из push записываем IP/UA/device/country визитора и редиректим на to. Без авторизации."""
+    from app.models.visitor import VisitorEvent
+
+    if len(vid) > 64 or not vid.replace("-", "").replace("_", "").replace(".", "").isalnum():
+        raise HTTPException(400, "Invalid visitor_id")
+    r = await db.execute(select(Doorway).where(Doorway.id == dw))
+    door = r.scalar_one_or_none()
+    if not door:
+        raise HTTPException(404, "Doorway not found")
+    ip = _client_ip(request)
+    ua = request.headers.get("user-agent") or ""
+    meta = {"ip": ip, "user_agent": ua[:500], "device": _device_from_ua(ua)}
+    country = await _country_from_ip(ip)
+    if country:
+        meta["country"] = country
+    ev = VisitorEvent(
+        visitor_id=vid,
+        doorway_id=dw,
+        campaign_id=door.campaign_id,
+        event_type="visit",
+        meta=meta,
+    )
+    db.add(ev)
+    await db.commit()
+    return RedirectResponse(url=to, status_code=302)
 
 
 class SendPushRequest(BaseModel):
@@ -573,28 +667,29 @@ async def send_push(
     set_r = await db.execute(
         select(Setting).where(
             Setting.user_id == current_user.id,
-            Setting.key == "vapid_private_key",
+            Setting.key.in_(["vapid_private_key", "api_base_url"]),
         )
     )
-    priv_row = set_r.scalar_one_or_none()
-    if not priv_row or not priv_row.value:
+    settings_list = set_r.scalars().all()
+    settings_map = {s.key: s.value for s in settings_list}
+    vapid_priv = settings_map.get("vapid_private_key")
+    if not vapid_priv:
         raise HTTPException(400, "VAPID ключи не настроены. Сгенерируйте в Настройках.")
+    api_base_url = (settings_map.get("api_base_url") or "").strip().rstrip("/") if settings_map.get("api_base_url") else ""
     try:
         from pywebpush import webpush
     except ImportError:
         raise HTTPException(503, "pywebpush не установлен")
-    payload = {"title": data.title, "body": data.body, "url": push_url or "/"}
-    payload_json = json.dumps(payload, ensure_ascii=False)
-    vapid_priv = priv_row.value
-    claims = {"sub": "mailto:admin@dorvey.local"}
+    vapid_claims = {"sub": "mailto:admin@dorvey.local"}
 
-    def _send_one(sub_info: dict) -> bool:
+    def _send_one(sub_info: dict, url: str) -> bool:
         try:
+            payload = {"title": data.title, "body": data.body, "url": url or "/"}
             webpush(
                 subscription_info=sub_info,
-                data=payload_json,
+                data=json.dumps(payload, ensure_ascii=False),
                 vapid_private_key=vapid_priv,
-                vapid_claims=claims,
+                vapid_claims=vapid_claims,
             )
             return True
         except Exception:
@@ -602,7 +697,11 @@ async def send_push(
 
     sent = 0
     for s in subs:
-        ok = await asyncio.to_thread(_send_one, s.subscription)
+        if api_base_url:
+            link_url = f"{api_base_url}/api/analytics/track-and-redirect?vid={quote(s.visitor_id)}&to={quote(push_url)}&dw={s.doorway_id}"
+        else:
+            link_url = push_url
+        ok = await asyncio.to_thread(_send_one, s.subscription, link_url)
         if ok:
             sent += 1
     return {"status": "ok", "sent": sent, "total": len(subs)}
@@ -702,7 +801,7 @@ async def get_visitors(
 ):
     """List captured visitors (for remarketing base). Requires visitor_capture_enabled."""
     from app.models.visitor import VisitorEvent
-    from sqlalchemy import distinct
+    from sqlalchemy import distinct, tuple_
 
     since = datetime.utcnow() - timedelta(days=days)
     subq = select(Doorway.id).join(Campaign).where(Campaign.user_id == current_user.id)
@@ -713,6 +812,7 @@ async def get_visitors(
         select(
             VisitorEvent.visitor_id,
             func.count(VisitorEvent.id).label("events"),
+            func.min(VisitorEvent.created_at).label("first_seen"),
             func.max(VisitorEvent.created_at).label("last_seen"),
         )
         .where(
@@ -732,12 +832,88 @@ async def get_visitors(
         )
     )
     total_count = total.scalar() or 0
+
+    visitors_list = [
+        {
+            "visitor_id": row.visitor_id,
+            "events": row.events,
+            "first_seen": row.first_seen.isoformat() if row.first_seen else None,
+            "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+        }
+        for row in rows
+    ]
+    if visitors_list:
+        vids = [v["visitor_id"] for v in visitors_list]
+        q_extra = select(VisitorEvent.visitor_id, VisitorEvent.doorway_id, VisitorEvent.event_type).where(
+            VisitorEvent.visitor_id.in_(vids),
+            VisitorEvent.doorway_id.in_(subq),
+        )
+        r_extra = await db.execute(q_extra)
+        visitor_doorway_ids = {}
+        visitor_event_counts = {}
+        for row in r_extra.all():
+            vid = row.visitor_id
+            visitor_doorway_ids.setdefault(vid, set()).add(row.doorway_id)
+            visitor_event_counts.setdefault(vid, {}).setdefault(row.event_type, 0)
+            visitor_event_counts[vid][row.event_type] += 1
+        all_dw_ids = list({dw_id for s in visitor_doorway_ids.values() for dw_id in s})
+        doorways_path_map = {}
+        if all_dw_ids:
+            rd_all = await db.execute(select(Doorway.id, Doorway.path, Doorway.title).where(Doorway.id.in_(all_dw_ids)))
+            for d in rd_all.all():
+                doorways_path_map[d.id] = (d.title or (d.path if d.path else "") or "").strip() or str(d.path or "")
+        for v in visitors_list:
+            dw_ids = visitor_doorway_ids.get(v["visitor_id"]) or set()
+            v["doorways_visited"] = [doorways_path_map.get(i, str(i)) for i in sorted(dw_ids)]
+            counts = visitor_event_counts.get(v["visitor_id"]) or {}
+            parts = []
+            if counts.get("visit"):
+                parts.append(f"{counts['visit']} визит(ов)")
+            if counts.get("click"):
+                parts.append(f"{counts['click']} клик(ов)")
+            if counts.get("push_subscribe"):
+                parts.append(f"{counts['push_subscribe']} подписка(ок)")
+            v["events_breakdown"] = ", ".join(parts) if parts else "—"
+
+        pairs = [(row.visitor_id, row.last_seen) for row in rows if row.last_seen]
+        if pairs:
+            q2 = select(VisitorEvent.visitor_id, VisitorEvent.created_at, VisitorEvent.doorway_id, VisitorEvent.campaign_id, VisitorEvent.meta).where(
+                tuple_(VisitorEvent.visitor_id, VisitorEvent.created_at).in_(pairs),
+                VisitorEvent.doorway_id.in_(subq),
+            )
+            r2 = await db.execute(q2)
+            last_events = {}
+            for row in r2.all():
+                k = (row.visitor_id, row.created_at.isoformat() if row.created_at else None)
+                last_events[k] = (row.doorway_id, row.campaign_id, row.meta or {})
+            dw_ids = list({x[0] for x in last_events.values()})
+            camp_ids = list({x[1] for x in last_events.values()})
+            doorways_map = {}
+            campaigns_map = {}
+            if dw_ids:
+                rd = await db.execute(select(Doorway.id, Doorway.path, Doorway.title).where(Doorway.id.in_(dw_ids)))
+                for d in rd.all():
+                    doorways_map[d.id] = (d.title or (d.path if d.path else "") or "").strip() or str(d.path or "")
+            if camp_ids:
+                rc = await db.execute(select(Campaign.id, Campaign.name).where(Campaign.id.in_(camp_ids)))
+                for c in rc.all():
+                    campaigns_map[c.id] = c.name or ""
+            for v in visitors_list:
+                key = (v["visitor_id"], v["last_seen"])
+                row_data = last_events.get(key)
+                if row_data:
+                    de_dw, de_camp, meta = row_data[0], row_data[1], row_data[2]
+                    v["doorway_id"] = de_dw
+                    v["campaign_id"] = de_camp
+                    v["doorway_path"] = doorways_map.get(de_dw, "")
+                    v["campaign_name"] = campaigns_map.get(de_camp, "")
+                    v["country"] = meta.get("country") or None
+                    v["device"] = meta.get("device") or None
+                    v["ip"] = _ip_display(meta.get("ip") or "")
+
     return {
         "total": total_count,
-        "visitors": [
-            {"visitor_id": row.visitor_id, "events": row.events, "last_seen": row.last_seen.isoformat() if row.last_seen else None}
-            for row in rows
-        ],
+        "visitors": visitors_list,
     }
 
 

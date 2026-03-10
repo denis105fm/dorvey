@@ -258,6 +258,31 @@ def deploy_doorway_sync(
         return False, str(e)
 
 
+def deploy_root_index_redirect(
+    server: Server,
+    first_path: str,
+    base_path: str = "/var/www/html",
+) -> tuple[bool, str]:
+    """
+    Deploy a minimal index.html at server root that redirects to first_path.
+    Use when no doorway has path "/" so that opening the domain root doesn't return 404.
+    first_path: e.g. "/en/survey-sites" (must start with /).
+    """
+    path = (first_path or "/").strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url={path}">
+<title>Redirect</title>
+</head>
+<body><p>Redirecting...</p></body>
+</html>"""
+    return deploy_doorway_sync(server, "", "/", html, base_path or getattr(server, "path", None) or "/var/www/html")
+
+
 def remove_doorway_from_server(
     server: Server,
     path: str,

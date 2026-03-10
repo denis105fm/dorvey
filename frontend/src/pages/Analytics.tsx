@@ -172,6 +172,46 @@ export default function Analytics() {
               </div>
             )}
           </div>
+          {visitors && visitors.visitors?.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <p className="text-slate-500 text-xs mb-2">Первый/последний визит, с каких дорвеев заходил и активность — по всем событиям (и по старым захватам). Страна/устройство/IP — только у новых визитов.</p>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-400 border-b border-slate-600">
+                    <th className="py-2 pr-2">ID посетителя</th>
+                    <th className="py-2 pr-2">Событий</th>
+                    <th className="py-2 pr-2">Первый визит</th>
+                    <th className="py-2 pr-2">Последний визит</th>
+                    <th className="py-2 pr-2">Страна</th>
+                    <th className="py-2 pr-2">Устройство</th>
+                    <th className="py-2 pr-2">IP</th>
+                    <th className="py-2 pr-2">Кампания</th>
+                    <th className="py-2 pr-2">Дорвей (посл.)</th>
+                    <th className="py-2 pr-2">С дорвеев</th>
+                    <th className="py-2 pr-2">Активность</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visitors.visitors.slice(0, 50).map((v: { visitor_id: string; events: number; first_seen?: string; last_seen?: string; campaign_name?: string; doorway_path?: string; country?: string; device?: string; ip?: string; doorways_visited?: string[]; events_breakdown?: string }) => (
+                    <tr key={v.visitor_id} className="border-b border-slate-700/50">
+                      <td className="py-1.5 text-slate-300 font-mono text-xs">{String(v.visitor_id).slice(0, 16)}…</td>
+                      <td className="py-1.5 text-slate-400">{v.events}</td>
+                      <td className="py-1.5 text-slate-400">{v.first_seen ? new Date(v.first_seen).toLocaleString("ru-RU") : "—"}</td>
+                      <td className="py-1.5 text-slate-400">{v.last_seen ? new Date(v.last_seen).toLocaleString("ru-RU") : "—"}</td>
+                      <td className="py-1.5 text-slate-400">{v.country ?? "—"}</td>
+                      <td className="py-1.5 text-slate-400">{v.device ?? "—"}</td>
+                      <td className="py-1.5 text-slate-400 font-mono text-xs">{v.ip ?? "—"}</td>
+                      <td className="py-1.5 text-slate-400">{v.campaign_name ?? "—"}</td>
+                      <td className="py-1.5 text-slate-400">{v.doorway_path ?? "—"}</td>
+                      <td className="py-1.5 text-slate-400 text-xs">{Array.isArray(v.doorways_visited) && v.doorways_visited.length ? v.doorways_visited.join(", ") : "—"}</td>
+                      <td className="py-1.5 text-slate-400 text-xs">{v.events_breakdown ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {visitors.visitors.length > 50 && <p className="text-slate-500 text-xs mt-1">Показаны первые 50 из {visitors.visitors.length}</p>}
+            </div>
+          )}
           <div className="space-y-3 mt-3">
             <p className="text-slate-500 text-sm">Отправить push подписчикам (кампания или конкретный дорвей):</p>
             <div className="flex flex-wrap gap-2 items-end">
