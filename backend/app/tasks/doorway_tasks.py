@@ -661,6 +661,99 @@ def delete_batch_async(self, user_id: int, doorway_ids: list[int]):
         remove_user_task(user_id, task_id)
 
 
+@celery_app.task(bind=True)
+def remove_from_server_batch_async(self, user_id: int, doorway_ids: list[int]):
+    """
+    Снять выбранные дорвеи с сервера и перевести в черновики. Прогресс и пауза/отмена в Redis remove_from_server_batch:{task_id}.
+    """
+    import asyncio
+    import time
+    from app.services.remove_from_server_batch_state import (
+        set_state,
+        update_state,
+        get_state,
+        remove_user_task,
+    )
+    from app.services.deploy import remove_doorway_from_server
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy import select
+    from app.core.config import settings
+    from app.models.doorway import Doorway
+    from app.models.domain import Domain
+    from app.models.server import Server
+    from app.models.campaign import Campaign
+
+    task_id = self.request.id
+    ids = list(doorway_ids or [])[:200]
+
+    def check_pause_cancel() -> bool:
+        """True = прервать (отмена), False = продолжать."""
+        s = get_state(task_id)
+        if not s:
+            return False
+        if s.get("status") == "cancelled":
+            return True
+        while s.get("status") == "paused":
+            time.sleep(0.5)
+            s = get_state(task_id)
+            if s and s.get("status") == "cancelled":
+                return True
+        return False
+
+    async def run():
+        engine = create_async_engine(settings.DATABASE_URL)
+        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with async_session() as db:
+            r = await db.execute(
+                select(Doorway, Domain, Server)
+                .join(Campaign, Doorway.campaign_id == Campaign.id)
+                .join(Domain, Doorway.domain_id == Domain.id)
+                .join(Server, Domain.server_id == Server.id)
+                .where(Doorway.id.in_(ids), Campaign.user_id == user_id)
+            )
+            rows = r.all()
+            items = [{"doorway": dw, "domain": dom, "server": srv} for dw, dom, srv in rows]
+            if not items:
+                set_state(task_id, {"user_id": user_id, "status": "completed", "total": 0, "current_index": 0, "results": [], "removed": 0})
+                return
+            results = [{"doorway_id": x["doorway"].id, "path": (x["doorway"].path or "/"), "status": "pending"} for x in items]
+            set_state(task_id, {
+                "user_id": user_id,
+                "status": "running",
+                "total": len(results),
+                "current_index": 0,
+                "results": results,
+                "removed": 0,
+            })
+            removed = 0
+            for i, x in enumerate(items):
+                if check_pause_cancel():
+                    update_state(task_id, status="cancelled", current_index=i, results=results, removed=removed)
+                    return
+                srv = x["server"]
+                dw = x["doorway"]
+                remove_doorway_from_server(
+                    server=srv,
+                    path=dw.path or "/",
+                    base_path=srv.path or "/var/www/html",
+                )
+                dw.status = "draft"
+                dw.deployed_at = None
+                dw.pause_reason = None
+                removed += 1
+                results[i]["status"] = "removed"
+                update_state(task_id, current_index=i + 1, results=results, removed=removed)
+            await db.commit()
+            update_state(task_id, status="completed", results=results, removed=removed)
+
+    try:
+        asyncio.run(run())
+        remove_user_task(user_id, task_id)
+    except Exception as e:
+        update_state(task_id, status="completed", error=str(e))
+        remove_user_task(user_id, task_id)
+
+
 @celery_app.task
 def collect_server_metrics():
     """Collect metrics for all servers via SSH. Run periodically via Celery Beat."""

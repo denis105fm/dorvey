@@ -230,16 +230,18 @@ async def generate_batch_dismiss(task_id: str, current_user: CurrentUser):
 
 @router.get("/active-batch-tasks")
 async def active_batch_tasks(current_user: CurrentUser):
-    """Return active batch task ids for this user (deploy, generate, delete) so any device/tab can show progress."""
+    """Return active batch task ids for this user (deploy, generate, delete, remove_from_server)."""
     import asyncio
     from app.services.batch_deploy_state import get_user_task_ids as get_deploy_ids
     from app.services.generate_batch_state import get_user_task_ids as get_generate_ids
     from app.services.delete_batch_state import get_user_task_ids as get_delete_ids
+    from app.services.remove_from_server_batch_state import get_user_task_ids as get_remove_from_server_ids
     uid = current_user.id
     deploy = await asyncio.to_thread(get_deploy_ids, uid)
     generate = await asyncio.to_thread(get_generate_ids, uid)
     delete = await asyncio.to_thread(get_delete_ids, uid)
-    return {"deploy": deploy or [], "generate": generate or [], "delete": delete or []}
+    remove_from_server = await asyncio.to_thread(get_remove_from_server_ids, uid)
+    return {"deploy": deploy or [], "generate": generate or [], "delete": delete or [], "remove_from_server": remove_from_server or []}
 
 
 @router.post("/", response_model=DoorwayResponse)
@@ -650,30 +652,92 @@ async def batch_remove_from_server(
     current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
-    """Удалить файлы выбранных дорвеев с сервера и перевести их в черновики. Записи в БД остаются."""
+    """Запустить снятие с сервера в фоне. Прогресс: GET /batch-remove-from-server/{task_id}/status. Пауза/отмена в окне прогресса."""
     if not data.doorway_ids:
         return {"removed": 0, "message": "Нет выбранных дорвеев"}
     r = await db.execute(
-        select(Doorway, Domain, Server)
+        select(Doorway.id)
         .join(Campaign, Doorway.campaign_id == Campaign.id)
-        .join(Domain, Doorway.domain_id == Domain.id)
-        .join(Server, Domain.server_id == Server.id)
         .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
     )
-    rows = r.all()
-    removed = 0
-    for dw, _dom, srv in rows:
-        remove_doorway_from_server(
-            server=srv,
-            path=dw.path or "/",
-            base_path=srv.path or "/var/www/html",
-        )
-        dw.status = "draft"
-        dw.deployed_at = None
-        dw.pause_reason = None
-        removed += 1
-    await db.commit()
-    return {"status": "ok", "removed": removed, "message": f"С сервера снято дорвеев: {removed}"}
+    ids = [row[0] for row in r.all()]
+    if not ids:
+        return {"removed": 0, "message": "Нет доступных дорвеев"}
+    from app.tasks.doorway_tasks import remove_from_server_batch_async
+    from app.services.remove_from_server_batch_state import set_state, add_user_task
+
+    task = remove_from_server_batch_async.delay(user_id=current_user.id, doorway_ids=ids)
+    set_state(task.id, {"user_id": current_user.id})
+    add_user_task(current_user.id, task.id)
+    return {"status": "queued", "task_id": task.id, "doorway_ids": ids}
+
+
+@router.get("/batch-remove-from-server/{task_id}/status")
+async def batch_remove_from_server_status(
+    task_id: str,
+    current_user: CurrentUser,
+):
+    import asyncio
+    from app.services.remove_from_server_batch_state import get_state
+    state = await asyncio.to_thread(get_state, task_id)
+    if not state or state.get("user_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "task_id": task_id,
+        "status": state.get("status", "running"),
+        "total": state.get("total", 0),
+        "current_index": state.get("current_index", 0),
+        "removed": state.get("removed", 0),
+        "error": state.get("error"),
+        "results": state.get("results") or [],
+    }
+
+
+@router.post("/batch-remove-from-server/{task_id}/pause")
+async def batch_remove_from_server_pause(task_id: str, current_user: CurrentUser):
+    import asyncio
+    from app.services.remove_from_server_batch_state import get_state, update_state
+    state = await asyncio.to_thread(get_state, task_id)
+    if not state or state.get("user_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if state.get("status") in ("completed", "cancelled"):
+        return {"status": state.get("status"), "message": "Уже завершено"}
+    await asyncio.to_thread(update_state, task_id, status="paused")
+    return {"status": "paused"}
+
+
+@router.post("/batch-remove-from-server/{task_id}/resume")
+async def batch_remove_from_server_resume(task_id: str, current_user: CurrentUser):
+    import asyncio
+    from app.services.remove_from_server_batch_state import get_state, update_state
+    state = await asyncio.to_thread(get_state, task_id)
+    if not state or state.get("user_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if state.get("status") != "paused":
+        return {"status": state.get("status"), "message": "Не на паузе"}
+    await asyncio.to_thread(update_state, task_id, status="running")
+    return {"status": "running"}
+
+
+@router.post("/batch-remove-from-server/{task_id}/cancel")
+async def batch_remove_from_server_cancel(task_id: str, current_user: CurrentUser):
+    import asyncio
+    from app.services.remove_from_server_batch_state import get_state, update_state
+    state = await asyncio.to_thread(get_state, task_id)
+    if not state or state.get("user_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if state.get("status") in ("completed", "cancelled"):
+        return {"status": state.get("status")}
+    await asyncio.to_thread(update_state, task_id, status="cancelled")
+    return {"status": "cancelled"}
+
+
+@router.post("/batch-remove-from-server/{task_id}/dismiss")
+async def batch_remove_from_server_dismiss(task_id: str, current_user: CurrentUser):
+    import asyncio
+    from app.services.remove_from_server_batch_state import remove_user_task
+    await asyncio.to_thread(remove_user_task, current_user.id, task_id)
+    return {"status": "ok"}
 
 
 class BatchQualityCheckRequest(BaseModel):

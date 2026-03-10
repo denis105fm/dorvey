@@ -67,7 +67,7 @@ function saveTaskIds(key: string, ids: string[]) {
   }
 }
 
-export type ProcessType = "generate" | "deploy" | "delete";
+export type ProcessType = "generate" | "deploy" | "delete" | "remove_from_server";
 
 export default function Doorways() {
   const qc = useQueryClient();
@@ -111,6 +111,14 @@ export default function Doorways() {
   const addDeleteTaskId = (id: string) => setBatchDeleteTaskIds([...batchDeleteTaskIds, id]);
   const removeDeleteTaskId = (id: string) => setBatchDeleteTaskIds(batchDeleteTaskIds.filter((x) => x !== id));
 
+  const [batchRemoveFromServerTaskIds, setBatchRemoveFromServerTaskIdsState] = useState<string[]>(() => loadTaskIds("dorvey_batch_remove_from_server_task_ids"));
+  const setBatchRemoveFromServerTaskIds = (ids: string[]) => {
+    setBatchRemoveFromServerTaskIdsState(ids);
+    saveTaskIds("dorvey_batch_remove_from_server_task_ids", ids);
+  };
+  const addRemoveFromServerTaskId = (id: string) => setBatchRemoveFromServerTaskIds([...batchRemoveFromServerTaskIds, id]);
+  const removeRemoveFromServerTaskId = (id: string) => setBatchRemoveFromServerTaskIds(batchRemoveFromServerTaskIds.filter((x) => x !== id));
+
   const [batchGenerateTaskIds, setBatchGenerateTaskIdsState] = useState<string[]>(() => loadTaskIds("dorvey_batch_generate_task_ids"));
   const setBatchGenerateTaskIds = (ids: string[]) => {
     setBatchGenerateTaskIdsState(ids);
@@ -123,7 +131,7 @@ export default function Doorways() {
 
   const { data: activeBatchTasks, refetch: refetchActiveBatchTasks } = useQuery({
     queryKey: ["active-batch-tasks"],
-    queryFn: () => api.get("/doorways/active-batch-tasks").then((r) => r.data as { deploy?: string[]; generate?: string[]; delete?: string[] }),
+    queryFn: () => api.get("/doorways/active-batch-tasks").then((r) => r.data as { deploy?: string[]; generate?: string[]; delete?: string[]; remove_from_server?: string[] }),
     refetchOnWindowFocus: true,
   });
   useEffect(() => {
@@ -139,6 +147,10 @@ export default function Doorways() {
     if (Array.isArray(activeBatchTasks.delete)) {
       setBatchDeleteTaskIdsState(activeBatchTasks.delete);
       saveTaskIds("dorvey_batch_delete_task_ids", activeBatchTasks.delete);
+    }
+    if (Array.isArray(activeBatchTasks.remove_from_server)) {
+      setBatchRemoveFromServerTaskIdsState(activeBatchTasks.remove_from_server);
+      saveTaskIds("dorvey_batch_remove_from_server_task_ids", activeBatchTasks.remove_from_server);
     }
   }, [activeBatchTasks]);
 
@@ -184,6 +196,9 @@ export default function Doorways() {
       }
       if (openProcess.type === "delete") {
         return api.get(`/doorways/batch-delete/${openProcess.task_id}/status`).then((r) => ({ type: "delete" as const, ...r.data }));
+      }
+      if (openProcess.type === "remove_from_server") {
+        return api.get(`/doorways/batch-remove-from-server/${openProcess.task_id}/status`).then((r) => ({ type: "remove_from_server" as const, ...r.data }));
       }
       return null;
     },
@@ -329,10 +344,14 @@ export default function Doorways() {
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
   });
   const batchRemoveFromServerMut = useMutation({
-    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-remove-from-server", { doorway_ids }).then((r) => r.data as { removed?: number; message?: string }),
-    onSuccess: (data: { removed?: number; message?: string }) => {
+    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-remove-from-server", { doorway_ids }).then((r) => r.data as { task_id?: string; doorway_ids?: number[] }),
+    onSuccess: (data: { task_id?: string; doorway_ids?: number[] }) => {
+      if (data?.task_id) {
+        addRemoveFromServerTaskId(data.task_id);
+        setOpenProcess({ type: "remove_from_server", task_id: data.task_id });
+      }
       qc.invalidateQueries({ queryKey: ["doorways"] });
-      toast.success(data?.message ?? `Снято с сервера: ${data?.removed ?? 0}`);
+      toast.success("Снятие с сервера запущено. Можно поставить на паузу или отменить.");
       setSelectedDoorwayIds(new Set());
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
@@ -578,7 +597,7 @@ export default function Doorways() {
         </div>
       </div>
 
-      {(batchGenerateTaskIds.length > 0 || batchDeployTaskIds.length > 0 || batchDeleteTaskIds.length > 0) && (
+      {(batchGenerateTaskIds.length > 0 || batchDeployTaskIds.length > 0 || batchDeleteTaskIds.length > 0 || batchRemoveFromServerTaskIds.length > 0) && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/80 px-4 py-2">
           <span className="text-slate-400 text-sm">Процессы:</span>
           {batchGenerateTaskIds.map((task_id, i) => (
@@ -606,6 +625,15 @@ export default function Doorways() {
               className={`rounded-lg px-3 py-1.5 text-sm text-white hover:opacity-90 ${openProcess?.type === "delete" && openProcess?.task_id === task_id ? "ring-2 ring-red-400 bg-red-600" : "bg-red-600/80"}`}
             >
               Удаление {batchDeleteTaskIds.length > 1 ? i + 1 : ""}
+            </button>
+          ))}
+          {batchRemoveFromServerTaskIds.map((task_id, i) => (
+            <button
+              key={task_id}
+              onClick={() => setOpenProcess({ type: "remove_from_server", task_id })}
+              className={`rounded-lg px-3 py-1.5 text-sm text-white hover:opacity-90 ${openProcess?.type === "remove_from_server" && openProcess?.task_id === task_id ? "ring-2 ring-amber-400 bg-amber-600" : "bg-amber-600/80"}`}
+            >
+              Снятие с сервера{batchRemoveFromServerTaskIds.length > 1 ? ` ${i + 1}` : ""}
             </button>
           ))}
           <button
@@ -994,6 +1022,14 @@ export default function Doorways() {
                       Прогресс удаления{batchDeleteTaskIds.length > 1 ? ` (${batchDeleteTaskIds.length})` : ""}
                     </button>
                   )}
+                  {batchRemoveFromServerTaskIds.length > 0 && (
+                    <button
+                      onClick={() => setOpenProcess({ type: "remove_from_server", task_id: batchRemoveFromServerTaskIds[0] })}
+                      className="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg text-sm"
+                    >
+                      Прогресс снятия{batchRemoveFromServerTaskIds.length > 1 ? ` (${batchRemoveFromServerTaskIds.length})` : ""}
+                    </button>
+                  )}
                   {selectedCount > 0 && (
                     <button
                       onClick={() => batchQualityMut.mutate(Array.from(selectedDoorwayIds))}
@@ -1045,6 +1081,14 @@ export default function Doorways() {
                       className="px-4 py-2 bg-red-600/80 hover:bg-red-600 text-white rounded-lg text-sm"
                     >
                       Прогресс удаления{batchDeleteTaskIds.length > 1 ? ` (${batchDeleteTaskIds.length})` : ""}
+                    </button>
+                  )}
+                  {batchRemoveFromServerTaskIds.length > 0 && (
+                    <button
+                      onClick={() => setOpenProcess({ type: "remove_from_server", task_id: batchRemoveFromServerTaskIds[0] })}
+                      className="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 text-white rounded-lg text-sm"
+                    >
+                      Прогресс снятия{batchRemoveFromServerTaskIds.length > 1 ? ` (${batchRemoveFromServerTaskIds.length})` : ""}
                     </button>
                   )}
                 </div>
@@ -1496,6 +1540,7 @@ export default function Doorways() {
             if (done && openProcess.type === "deploy") { removeDeployTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); }
             if (done && openProcess.type === "generate") { removeGenerateTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); }
             if (done && openProcess.type === "delete") { removeDeleteTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); setSelectedDoorwayIds(new Set()); }
+            if (done && openProcess.type === "remove_from_server") { removeRemoveFromServerTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); }
             setOpenProcess(null);
           }}
         >
@@ -1633,6 +1678,75 @@ export default function Doorways() {
                         <div className="flex gap-2 flex-wrap">
                           <Button variant="secondary" size="sm" onClick={() => refetchProcessStatus()}>Повторить</Button>
                           <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/generate-batch/${openProcess.task_id}/dismiss`); } catch {} removeGenerateTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400">Загрузка статуса…</p>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {openProcess.type === "remove_from_server" && (
+              <>
+                <h2 className="text-lg font-medium text-white mb-3 flex justify-between items-center">
+                  <span>Снятие с сервера</span>
+                  <button onClick={() => { if (processStatus?.status === "completed" || processStatus?.status === "cancelled") { removeRemoveFromServerTaskId(openProcess.task_id); qc.invalidateQueries({ queryKey: ["doorways"] }); } setOpenProcess(null); }} className="text-slate-400 hover:text-white">✕</button>
+                </h2>
+                {processStatus ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-slate-400 mb-1">
+                        <span>{processStatus.status === "queued" && "Подготовка…"} {processStatus.status === "running" && "В процессе…"} {processStatus.status === "paused" && "На паузе"} {processStatus.status === "completed" && "Завершён"} {processStatus.status === "cancelled" && "Отменён"}</span>
+                        <span>{processStatus.current_index ?? 0} / {processStatus.total ?? 0} (снято: {processStatus.removed ?? 0})</span>
+                      </div>
+                      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-amber-500 transition-all duration-300" style={{ width: `${processStatus.total ? Math.round(((processStatus.current_index ?? 0) / processStatus.total) * 100) : 0}%` }} />
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto flex-1 min-h-0 border border-slate-700 rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b border-slate-600 text-slate-400 text-left"><th className="py-2 px-2 font-medium w-24">Статус</th><th className="py-2 px-2 font-medium">Путь</th></tr></thead>
+                        <tbody>
+                          {(processStatus.results ?? []).map((r: { doorway_id: number; path: string; status: string }, idx: number) => (
+                            <tr key={idx} className="border-b border-slate-700/50">
+                              <td className="py-2 px-2 align-middle">{r.status === "removed" && <span className="text-emerald-400">✓ Снят</span>} {r.status === "pending" && <span className="text-amber-400 text-xs">В очереди</span>}</td>
+                              <td className="py-2 px-2 text-slate-300 font-mono text-xs">{r.path ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {processStatus.error && <p className="text-red-400 text-sm mt-2">{processStatus.error}</p>}
+                    <div className="pt-4 flex gap-2 flex-wrap">
+                      {processStatus.status === "running" && (
+                        <>
+                          <Button variant="secondary" size="sm" onClick={async () => { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/pause`); refetchProcessStatus(); }}>Пауза</Button>
+                          <Button variant="destructive" size="sm" onClick={async () => { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/cancel`); refetchProcessStatus(); }}>Отменить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/cancel`); } catch {} try { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/dismiss`); } catch {} removeRemoveFromServerTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
+                        </>
+                      )}
+                      {processStatus.status === "paused" && (
+                        <>
+                          <Button size="sm" onClick={async () => { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/resume`); refetchProcessStatus(); }}>Продолжить</Button>
+                          <Button variant="destructive" size="sm" onClick={async () => { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/cancel`); refetchProcessStatus(); }}>Отменить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/cancel`); } catch {} try { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/dismiss`); } catch {} removeRemoveFromServerTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
+                        </>
+                      )}
+                      {(processStatus.status === "completed" || processStatus.status === "cancelled") && (
+                        <Button variant="secondary" onClick={() => { removeRemoveFromServerTaskId(openProcess.task_id); setOpenProcess(null); qc.invalidateQueries({ queryKey: ["doorways"] }); }}>Закрыть</Button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {processStatusError ? (
+                      <div className="py-4">
+                        <p className="text-amber-400 mb-2">Не удалось загрузить статус.</p>
+                        <div className="flex gap-2 flex-wrap">
+                          <Button variant="secondary" size="sm" onClick={() => refetchProcessStatus()}>Повторить</Button>
+                          <Button variant="ghost" size="sm" className="text-slate-400" onClick={async () => { try { await api.post(`/doorways/batch-remove-from-server/${openProcess.task_id}/dismiss`); } catch {} removeRemoveFromServerTaskId(openProcess.task_id); setOpenProcess(null); }}>Убрать из списка</Button>
                         </div>
                       </div>
                     ) : (
