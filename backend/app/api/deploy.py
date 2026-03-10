@@ -235,7 +235,7 @@ async def deploy_doorway(
             paths = [(p or "/").strip() or "/" for (p,) in r_paths.all()]
             if paths and "/" not in paths:
                 first_path = sorted(paths)[0]
-                root_ok, _ = await asyncio.to_thread(
+                root_ok, root_err = await asyncio.to_thread(
                     deploy_root_index_redirect,
                     srv,
                     first_path,
@@ -243,8 +243,10 @@ async def deploy_doorway(
                 )
                 if root_ok:
                     msg += "; в корень домена добавлен редирект"
-        except Exception:
-            pass  # основной дорвей уже задеплоен — не падаем из-за заглушки в корне
+                else:
+                    msg += "; заглушка в корень не загружена (" + (root_err or "ошибка")[:80] + "). Проверьте «Путь к файлам» на сервере и nginx root для этого домена или нажмите «Починить корень домена»."
+        except Exception as e:
+            msg += "; заглушка в корень не загружена (" + str(e)[:80] + "). Путь на сервере в Dorvey должен совпадать с root в nginx для этого домена."
     # Deploy service worker for push (when visitor capture may be used)
     if getattr(srv, "auth_type", None) != "ftp":
         set_vis = await db.execute(
