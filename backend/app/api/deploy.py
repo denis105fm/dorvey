@@ -224,6 +224,23 @@ async def deploy_doorway(
                     msg += "; cloaking SEO version deployed (index.seo.html)"
     if not ok:
         raise HTTPException(status_code=500, detail=f"Deploy failed: {msg}")
+    # Если в корне домена нет дорвея — кладём заглушку с редиректом, чтобы не было 404 на корне URL
+    if getattr(srv, "auth_type", None) != "ftp":
+        r_paths = await db.execute(
+            select(Doorway.path).join(Campaign, Doorway.campaign_id == Campaign.id).where(
+                Doorway.domain_id == dw.domain_id, Campaign.user_id == current_user.id
+            )
+        )
+        paths = [(p or "/").strip() or "/" for (p,) in r_paths.all()]
+        if paths and "/" not in paths:
+            first_path = sorted(paths)[0]
+            await asyncio.to_thread(
+                deploy_root_index_redirect,
+                srv,
+                first_path,
+                srv.path or "/var/www/html",
+            )
+            msg += "; в корень домена добавлен редирект"
     # Deploy service worker for push (when visitor capture may be used)
     if getattr(srv, "auth_type", None) != "ftp":
         set_vis = await db.execute(

@@ -280,6 +280,13 @@ export default function Doorways() {
     },
     onError: () => toast.error("Ошибка деплоя"),
   });
+  const fixRootMut = useMutation({
+    mutationFn: (domain_id: number) => api.post(`/deploy/domain/${domain_id}/fix-root`).then((r) => r.data),
+    onSuccess: (data: { message?: string }) => {
+      toast.success((data as { message?: string })?.message ?? "Корень домена обновлён");
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
   const batchDeployMut = useMutation({
     mutationFn: (doorway_ids: number[]) => api.post("/deploy/batch", { doorway_ids }).then((r) => r.data),
     onSuccess: (data: { status?: string; task_id?: string; doorway_ids?: number[] }) => {
@@ -1160,6 +1167,11 @@ export default function Doorways() {
                             )}
                             {(d.status === "deployed" || d.status === "indexed") && (
                               <DropdownMenuItem onClick={() => setDeployDoorwayId(d.id)}>Повторный деплой</DropdownMenuItem>
+                            )}
+                            {(d.status === "deployed" || d.status === "indexed") && d.path !== "/" && (
+                              <DropdownMenuItem onClick={() => fixRootMut.mutate(d.domain_id)} disabled={fixRootMut.isPending}>
+                                {fixRootMut.isPending ? "…" : "Починить корень домена"}
+                              </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => runSslMut.mutate(d.id)} disabled={runSslMut.isPending}>
                               {runSslMut.isPending ? "SSL…" : "Получить SSL"}
