@@ -292,7 +292,6 @@ async def deploy_doorway(
     url = await get_doorway_url(db, doorway_id)
     # Sitemap + robots.txt on server (SSH only, automatic)
     if getattr(srv, "auth_type", None) != "ftp":
-        import asyncio
         sitemap_xml = await generate_sitemap_xml(db, dom.id)
         if sitemap_xml:
             robots_txt = generate_robots_txt(dom.domain)
