@@ -229,7 +229,7 @@ def deploy_batch_with_stagger(
     from app.models.server import Server
     from app.models.campaign import Campaign
     from app.models.setting import Setting
-    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push, deploy_sitemap_robots_sync, deploy_indexnow_key_sync, deploy_root_index_redirect
+    from app.services.deploy import deploy_doorway_sync, prepare_doorway_html, run_certbot_ssl, deploy_sw_push, deploy_sitemap_robots_sync, deploy_indexnow_key_sync, deploy_root_index_redirect, ensure_nginx_http
     from app.services.indexing import get_doorway_url, generate_sitemap_xml, generate_robots_txt
     from datetime import datetime
 
@@ -391,7 +391,7 @@ def deploy_batch_with_stagger(
                 domain_id, path, dom, srv = row
                 path_norm = (path or "/").strip() or "/"
                 if domain_id not in by_domain:
-                    by_domain[domain_id] = {"server": srv, "paths": set()}
+                    by_domain[domain_id] = {"server": srv, "domain": getattr(dom, "domain", "") or "", "paths": set()}
                 by_domain[domain_id]["paths"].add(path_norm)
             for domain_id, data in by_domain.items():
                 if "/" not in data["paths"]:
@@ -401,6 +401,16 @@ def deploy_batch_with_stagger(
                         first_path,
                         data["server"].path or "/var/www/html",
                     )
+                # Конфиг nginx для порта 80 (server_name + root)
+                if getattr(data["server"], "auth_type", None) != "ftp" and data.get("domain"):
+                    try:
+                        ensure_nginx_http(
+                            data["server"],
+                            data["domain"],
+                            data["server"].path or "/var/www/html",
+                        )
+                    except Exception:
+                        pass
             await db.commit()
         final_status = "cancelled" if get_state(task_id) and get_state(task_id).get("status") == "cancelled" else "completed"
         update_state(task_id, status=final_status, results=[{"doorway_id": x["doorway_id"], "status": x["status"], "message": x.get("message")} for x in results])

@@ -462,6 +462,43 @@ def _configure_nginx_443(client_factory, domain: str, webroot: str) -> str:
         return f"Nginx config skip: {e}"
 
 
+def ensure_nginx_http(server: Server, domain: str, webroot: str) -> tuple[bool, str]:
+    """Создать конфиг nginx для порта 80 (server_name + root), чтобы домен работал по HTTP без certbot. Возвращает (success, message)."""
+    import base64
+    domain_clean = (domain or "").strip().lower()
+    for p in ("https://", "http://"):
+        if domain_clean.startswith(p):
+            domain_clean = domain_clean[len(p):]
+    if "/" in domain_clean:
+        domain_clean = domain_clean.split("/")[0]
+    domain_clean = domain_clean.rstrip("/").split(":")[0]
+    if not domain_clean or domain_clean == "localhost":
+        return False, "Invalid domain"
+    root_path = (webroot or "/var/www/html").rstrip("/")
+    config = f"""server {{
+  listen 80;
+  server_name {domain_clean} www.{domain_clean};
+  root {root_path};
+  index index.html;
+  location / {{
+    try_files $uri $uri/ $uri/index.html =404;
+  }}
+}}
+"""
+    safe_name = domain_clean.replace(".", "_")
+    try:
+        client = _get_ssh_client(server)
+        b64 = base64.b64encode(config.encode()).decode()
+        cmd = f"echo '{b64}' | base64 -d > /etc/nginx/conf.d/dorvey-{safe_name}.conf 2>/dev/null && nginx -t 2>&1 && (systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null) && echo 'Nginx HTTP configured' || echo 'Nginx: write/reload failed'"
+        stdin, stdout, stderr = client.exec_command(cmd, timeout=15)
+        out = (stdout.read().decode() or "") + (stderr.read().decode() or "")
+        client.close()
+        ok = "Nginx HTTP configured" in out or "syntax is ok" in out
+        return ok, out.strip() if out else ""
+    except Exception as e:
+        return False, str(e)
+
+
 def _append_sub_id(url: str, doorway_id: int, offer_id: Optional[int] = None, source: Optional[str] = None) -> str:
     """Add sub_id to affiliate URL for postback attribution.
     If offer_id is set: sub_id=doorway_id_offer_id (for per-offer metrics).

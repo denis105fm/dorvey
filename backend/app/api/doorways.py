@@ -501,6 +501,42 @@ async def batch_generate_quiz(
     return {"results": results}
 
 
+@router.post("/{doorway_id}/remove-from-server")
+async def remove_doorway_from_server_endpoint(
+    doorway_id: int,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Удалить файлы дорвея с сервера и перевести в черновики. Запись в БД остаётся."""
+    result = await db.execute(
+        select(Doorway, Campaign)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .where(Doorway.id == doorway_id, Campaign.user_id == current_user.id)
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Doorway not found")
+    doorway, _ = row
+    srv_r = await db.execute(
+        select(Server)
+        .join(Domain, Domain.server_id == Server.id)
+        .where(Domain.id == doorway.domain_id)
+    )
+    srv_row = srv_r.first()
+    if srv_row:
+        srv = srv_row[0]
+        remove_doorway_from_server(
+            server=srv,
+            path=doorway.path or "/",
+            base_path=srv.path or "/var/www/html",
+        )
+    doorway.status = "draft"
+    doorway.deployed_at = None
+    doorway.pause_reason = None
+    await db.commit()
+    return {"status": "ok", "message": "Снято с сервера, дорвей в черновиках"}
+
+
 @router.delete("/{doorway_id}", status_code=204)
 async def delete_doorway(
     doorway_id: int,
@@ -602,6 +638,42 @@ async def batch_delete_dismiss(task_id: str, current_user: CurrentUser):
     from app.services.delete_batch_state import remove_user_task
     await asyncio.to_thread(remove_user_task, current_user.id, task_id)
     return {"status": "ok"}
+
+
+class BatchRemoveFromServerRequest(BaseModel):
+    doorway_ids: List[int]
+
+
+@router.post("/batch-remove-from-server")
+async def batch_remove_from_server(
+    data: BatchRemoveFromServerRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Удалить файлы выбранных дорвеев с сервера и перевести их в черновики. Записи в БД остаются."""
+    if not data.doorway_ids:
+        return {"removed": 0, "message": "Нет выбранных дорвеев"}
+    r = await db.execute(
+        select(Doorway, Domain, Server)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .join(Domain, Doorway.domain_id == Domain.id)
+        .join(Server, Domain.server_id == Server.id)
+        .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
+    )
+    rows = r.all()
+    removed = 0
+    for dw, _dom, srv in rows:
+        remove_doorway_from_server(
+            server=srv,
+            path=dw.path or "/",
+            base_path=srv.path or "/var/www/html",
+        )
+        dw.status = "draft"
+        dw.deployed_at = None
+        dw.pause_reason = None
+        removed += 1
+    await db.commit()
+    return {"status": "ok", "removed": removed, "message": f"С сервера снято дорвеев: {removed}"}
 
 
 class BatchQualityCheckRequest(BaseModel):

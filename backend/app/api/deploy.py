@@ -14,7 +14,7 @@ from app.models.campaign import Campaign
 from app.models.domain import Domain
 from app.models.setting import Setting
 from app.models.server import Server
-from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl, deploy_sitemap_robots_sync, deploy_indexnow_key_sync, deploy_root_index_redirect
+from app.services.deploy import prepare_doorway_html, deploy_doorway_sync, deploy_doorway_ftp, deploy_sw_push, run_certbot_ssl, deploy_sitemap_robots_sync, deploy_indexnow_key_sync, deploy_root_index_redirect, ensure_nginx_http
 from app.services.indexing import get_doorway_url, generate_sitemap_xml, generate_robots_txt
 
 router = APIRouter()
@@ -247,6 +247,18 @@ async def deploy_doorway(
                     msg += "; заглушка в корень не загружена (" + (root_err or "ошибка")[:80] + "). Проверьте «Путь к файлам» на сервере и nginx root для этого домена или нажмите «Починить корень домена»."
         except Exception as e:
             msg += "; заглушка в корень не загружена (" + str(e)[:80] + "). Путь на сервере в Dorvey должен совпадать с root в nginx для этого домена."
+    # Конфиг nginx для порта 80 (server_name + root), чтобы домен работал по HTTP без ручной настройки
+    if getattr(srv, "auth_type", None) != "ftp":
+        try:
+            nginx_ok, nginx_out = await asyncio.to_thread(
+                ensure_nginx_http, srv, dom.domain, srv.path or "/var/www/html"
+            )
+            if nginx_ok:
+                msg += "; nginx (port 80) настроен для домена"
+            elif nginx_out:
+                msg += "; nginx: " + (nginx_out[:60] if nginx_out else "")
+        except Exception:
+            pass
     # Deploy service worker for push (when visitor capture may be used)
     if getattr(srv, "auth_type", None) != "ftp":
         set_vis = await db.execute(

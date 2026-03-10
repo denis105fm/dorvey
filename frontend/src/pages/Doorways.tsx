@@ -320,6 +320,23 @@ export default function Doorways() {
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка удаления"),
   });
+  const removeFromServerMut = useMutation({
+    mutationFn: (id: number) => api.post(`/doorways/${id}/remove-from-server`).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      toast.success("Снято с сервера, дорвей в черновиках");
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
+  const batchRemoveFromServerMut = useMutation({
+    mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-remove-from-server", { doorway_ids }).then((r) => r.data as { removed?: number; message?: string }),
+    onSuccess: (data: { removed?: number; message?: string }) => {
+      qc.invalidateQueries({ queryKey: ["doorways"] });
+      toast.success(data?.message ?? `Снято с сервера: ${data?.removed ?? 0}`);
+      setSelectedDoorwayIds(new Set());
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
   const batchQualityMut = useMutation({
     mutationFn: (doorway_ids: number[]) => api.post("/doorways/batch-quality-check", { doorway_ids }).then((r) => r.data),
     onSuccess: (data: { results?: Array<{ doorway_id: number; path: string; title: string; ok: boolean; errors: string[]; warnings: string[]; warning_codes?: { code: string; message: string }[] }> }) => {
@@ -1009,6 +1026,19 @@ export default function Doorways() {
                       {batchDeleteMut.isPending ? "Запуск…" : `Удалить выбранные (${selectedCount})`}
                     </button>
                   )}
+                  {(filtered as Doorway[]).filter((d: Doorway) => selectedDoorwayIds.has(d.id) && (d.status === "deployed" || d.status === "indexed")).length > 0 && (
+                    <button
+                      onClick={() => {
+                        const ids = (filtered as Doorway[]).filter((d: Doorway) => selectedDoorwayIds.has(d.id) && (d.status === "deployed" || d.status === "indexed")).map((d: Doorway) => d.id);
+                        if (!ids.length) return;
+                        batchRemoveFromServerMut.mutate(ids);
+                      }}
+                      disabled={batchRemoveFromServerMut.isPending}
+                      className="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg text-sm"
+                    >
+                      {batchRemoveFromServerMut.isPending ? "…" : "Снять с сервера выбранные"}
+                    </button>
+                  )}
                   {batchDeleteTaskIds.length > 0 && (
                     <button
                       onClick={() => setOpenProcess({ type: "delete", task_id: batchDeleteTaskIds[0] })}
@@ -1171,6 +1201,11 @@ export default function Doorways() {
                             {(d.status === "deployed" || d.status === "indexed") && d.path !== "/" && (
                               <DropdownMenuItem onClick={() => fixRootMut.mutate(d.domain_id)} disabled={fixRootMut.isPending}>
                                 {fixRootMut.isPending ? "…" : "Починить корень домена"}
+                              </DropdownMenuItem>
+                            )}
+                            {(d.status === "deployed" || d.status === "indexed") && (
+                              <DropdownMenuItem onClick={() => removeFromServerMut.mutate(d.id)} disabled={removeFromServerMut.isPending}>
+                                {removeFromServerMut.isPending ? "…" : "Снять с сервера"}
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => runSslMut.mutate(d.id)} disabled={runSslMut.isPending}>
