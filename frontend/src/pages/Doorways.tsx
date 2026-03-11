@@ -544,6 +544,17 @@ export default function Doorways() {
     onError: (e: { response?: { data?: { detail?: string } } }) =>
       toast.error(e?.response?.data?.detail ?? "Ошибка SSL (Certbot)"),
   });
+  const batchSslMut = useMutation({
+    mutationFn: (doorway_ids: number[]) => api.post("/deploy/batch-ssl", { doorway_ids }).then((r) => r.data as { results?: { domain: string; ok: boolean; message?: string }[]; ok_count?: number; total?: number }),
+    onSuccess: (data: { results?: { domain: string; ok: boolean; message?: string }[]; ok_count?: number; total?: number }) => {
+      const ok = data?.ok_count ?? (data?.results ?? []).filter((r) => r.ok).length;
+      const total = data?.total ?? (data?.results ?? []).length;
+      if (ok > 0) toast.success(`SSL получен для ${ok} из ${total} доменов`);
+      const failed = (data?.results ?? []).filter((r) => !r.ok);
+      if (failed.length > 0) toast.warning(failed.map((r) => `${r.domain}: ${r.message || "ошибка"}`).slice(0, 2).join("; "));
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
 
   const openPanel = (id: number, type: "quality" | "predict" | "broken" | "forecast" | "sources") => {
     setPanelDoorwayId(id);
@@ -1073,6 +1084,26 @@ export default function Doorways() {
                       className="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg text-sm"
                     >
                       {batchRemoveFromServerMut.isPending ? "…" : "Снять с сервера выбранные"}
+                    </button>
+                  )}
+                  {selectedCount > 0 && (
+                    <button
+                      onClick={() => batchSslMut.mutate(Array.from(selectedDoorwayIds))}
+                      disabled={batchSslMut.isPending}
+                      className="px-4 py-2 bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg text-sm"
+                      title="Certbot для доменов выбранных дорвеев (по одному разу на домен)"
+                    >
+                      {batchSslMut.isPending ? "SSL…" : "Получить SSL выбранным"}
+                    </button>
+                  )}
+                  {filtered.length > 0 && (
+                    <button
+                      onClick={() => batchSslMut.mutate((filtered as Doorway[]).map((d: Doorway) => d.id))}
+                      disabled={batchSslMut.isPending}
+                      className="px-4 py-2 bg-emerald-600/60 hover:bg-emerald-600/80 disabled:opacity-50 text-white rounded-lg text-sm"
+                      title="Certbot для доменов всех дорвеев в текущем списке"
+                    >
+                      {batchSslMut.isPending ? "SSL…" : "Получить SSL всем в списке"}
                     </button>
                   )}
                   {batchDeleteTaskIds.length > 0 && (

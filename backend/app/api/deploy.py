@@ -119,6 +119,51 @@ async def doorway_ssl(
     raise HTTPException(status_code=500, detail=ssl_msg or "Certbot failed")
 
 
+class BatchSslRequest(BaseModel):
+    doorway_ids: list[int]
+
+
+@router.post("/batch-ssl")
+async def batch_ssl(
+    data: BatchSslRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Запустить Certbot для доменов выбранных дорвеев. По одному разу на домен.
+    Удобно, если HTTPS не установился при деплое (например certbot не был установлен).
+    """
+    if not data.doorway_ids:
+        return {"status": "ok", "results": [], "message": "Нет выбранных дорвеев"}
+    r = await db.execute(
+        select(Doorway.domain_id, Domain.domain, Server)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .join(Domain, Doorway.domain_id == Domain.id)
+        .join(Server, Domain.server_id == Server.id)
+        .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
+    )
+    rows = r.all()
+    # Уникальные домены (один certbot на домен)
+    by_domain: dict[int, tuple[str, object]] = {}
+    for domain_id, domain_name, server in rows:
+        if domain_id not in by_domain:
+            by_domain[domain_id] = (domain_name, server)
+    results = []
+    for domain_id, (domain_name, srv) in by_domain.items():
+        if getattr(srv, "auth_type", None) == "ftp":
+            results.append({"domain": domain_name or "", "ok": False, "message": "SSL только для SSH-серверов"})
+            continue
+        ssl_ok, ssl_msg = await asyncio.to_thread(
+            run_certbot_ssl,
+            srv,
+            domain_name or "",
+            srv.path or "/var/www/html",
+        )
+        results.append({"domain": domain_name or "", "ok": ssl_ok, "message": (ssl_msg or "")[:200]})
+    ok_count = sum(1 for x in results if x["ok"])
+    return {"status": "ok", "results": results, "ok_count": ok_count, "total": len(results)}
+
+
 @router.post("/domain/{domain_id}/fix-root")
 async def fix_domain_root(
     domain_id: int,
