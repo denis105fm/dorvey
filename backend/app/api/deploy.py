@@ -205,6 +205,61 @@ async def fix_domain_root(
     raise HTTPException(status_code=500, detail=msg or "Ошибка деплоя")
 
 
+class RefreshSitemapRequest(BaseModel):
+    doorway_ids: list[int]
+
+
+@router.post("/refresh-sitemap")
+async def refresh_sitemap(
+    data: RefreshSitemapRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Перегенерировать и загрузить sitemap.xml (и robots.txt) для доменов выбранных дорвеев.
+    По одному sitemap на домен. Удобно, если в sitemap попала не вся выдача.
+    """
+    if not data.doorway_ids:
+        return {"status": "ok", "results": [], "message": "Нет выбранных дорвеев"}
+    r = await db.execute(
+        select(Doorway.domain_id, Domain.domain, Domain.id.label("dom_id"), Server)
+        .join(Campaign, Doorway.campaign_id == Campaign.id)
+        .join(Domain, Doorway.domain_id == Domain.id)
+        .join(Server, Domain.server_id == Server.id)
+        .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
+    )
+    rows = r.all()
+    by_domain: dict[int, tuple[str, int, object]] = {}
+    for domain_id, domain_name, dom_id, server in rows:
+        if domain_id not in by_domain:
+            by_domain[domain_id] = (domain_name or "", dom_id, server)
+    results = []
+    for domain_id, (domain_name, dom_id, srv) in by_domain.items():
+        if getattr(srv, "auth_type", None) == "ftp":
+            results.append({"domain": domain_name, "ok": False, "message": "Только для SSH-серверов"})
+            continue
+        sitemap_xml = await generate_sitemap_xml(db, dom_id)
+        if not sitemap_xml:
+            results.append({"domain": domain_name, "ok": False, "message": "Не удалось сгенерировать sitemap"})
+            continue
+        robots_txt = generate_robots_txt(domain_name)
+        ok, msg = await asyncio.to_thread(
+            deploy_sitemap_robots_sync,
+            srv.host,
+            srv.port or 22,
+            srv.user,
+            srv.auth_type or "password",
+            srv.auth_data or "",
+            srv.path or "/var/www/html",
+            sitemap_xml,
+            robots_txt,
+        )
+        url_count = sitemap_xml.count("<loc>")
+        results.append({"domain": domain_name, "ok": ok, "message": msg[:150] if msg else "", "urls": url_count})
+    ok_count = sum(1 for x in results if x["ok"])
+    return {"status": "ok", "results": results, "ok_count": ok_count, "total_domains": len(results)}
+
+
 @router.post("/doorway/{doorway_id}")
 async def deploy_doorway(
     doorway_id: int,

@@ -555,6 +555,20 @@ export default function Doorways() {
     },
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
   });
+  const refreshSitemapMut = useMutation({
+    mutationFn: (doorway_ids: number[]) => api.post("/deploy/refresh-sitemap", { doorway_ids }).then((r) => r.data as { results?: { domain: string; ok: boolean; message?: string; urls?: number }[]; ok_count?: number; total_domains?: number }),
+    onSuccess: (data: { results?: { domain: string; ok: boolean; message?: string; urls?: number }[]; ok_count?: number; total_domains?: number }) => {
+      const ok = data?.ok_count ?? 0;
+      const total = data?.total_domains ?? 0;
+      if (ok > 0) {
+        const urls = (data?.results ?? []).filter((r) => r.ok && r.urls != null).reduce((a, r) => a + (r.urls ?? 0), 0);
+        toast.success(`Sitemap обновлён для ${ok} из ${total} доменов${urls ? ` (всего ${urls} URL)` : ""}`);
+      }
+      const failed = (data?.results ?? []).filter((r) => !r.ok);
+      if (failed.length > 0) toast.warning(failed.map((r) => `${r.domain}: ${r.message || "ошибка"}`).slice(0, 2).join("; "));
+    },
+    onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
+  });
 
   const openPanel = (id: number, type: "quality" | "predict" | "broken" | "forecast" | "sources") => {
     setPanelDoorwayId(id);
@@ -1104,6 +1118,26 @@ export default function Doorways() {
                       title="Certbot для доменов всех дорвеев в текущем списке"
                     >
                       {batchSslMut.isPending ? "SSL…" : "Получить SSL всем в списке"}
+                    </button>
+                  )}
+                  {selectedIds.length > 0 && (
+                    <button
+                      onClick={() => refreshSitemapMut.mutate(selectedIds)}
+                      disabled={refreshSitemapMut.isPending}
+                      className="px-4 py-2 bg-sky-600/60 hover:bg-sky-600/80 disabled:opacity-50 text-white rounded-lg text-sm"
+                      title="Перегенерировать и загрузить sitemap.xml для доменов выбранных дорвеев"
+                    >
+                      {refreshSitemapMut.isPending ? "Sitemap…" : "Обновить sitemap выбранными"}
+                    </button>
+                  )}
+                  {filtered.length > 0 && (
+                    <button
+                      onClick={() => refreshSitemapMut.mutate((filtered as Doorway[]).map((d: Doorway) => d.id))}
+                      disabled={refreshSitemapMut.isPending}
+                      className="px-4 py-2 bg-sky-600/60 hover:bg-sky-600/80 disabled:opacity-50 text-white rounded-lg text-sm"
+                      title="Перегенерировать и загрузить sitemap.xml для доменов всех дорвеев в списке"
+                    >
+                      {refreshSitemapMut.isPending ? "Sitemap…" : "Обновить sitemap всем в списке"}
                     </button>
                   )}
                   {batchDeleteTaskIds.length > 0 && (
