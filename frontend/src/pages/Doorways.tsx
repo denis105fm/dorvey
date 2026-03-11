@@ -561,8 +561,14 @@ export default function Doorways() {
       const ok = data?.ok_count ?? 0;
       const total = data?.total_domains ?? 0;
       if (ok > 0) {
-        const urls = (data?.results ?? []).filter((r) => r.ok && r.urls != null).reduce((a, r) => a + (r.urls ?? 0), 0);
-        toast.success(`Sitemap обновлён для ${ok} из ${total} доменов${urls ? ` (всего ${urls} URL)` : ""}`);
+        const results = data?.results ?? [];
+        const totalUrls = results.filter((r) => r.ok && r.urls != null).reduce((a, r) => a + (r.urls ?? 0), 0);
+        const byDomain = results.filter((r) => r.ok && r.urls != null).map((r) => `${r.domain}: ${r.urls} URL`);
+        toast.success(
+          byDomain.length <= 3
+            ? `Sitemap: ${byDomain.join("; ")}`
+            : `Sitemap обновлён для ${ok} из ${total} доменов (всего ${totalUrls} URL)`
+        );
       }
       const failed = (data?.results ?? []).filter((r) => !r.ok);
       if (failed.length > 0) toast.warning(failed.map((r) => `${r.domain}: ${r.message || "ошибка"}`).slice(0, 2).join("; "));

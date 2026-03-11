@@ -30,7 +30,7 @@ async def generate_sitemap_xml(db: AsyncSession, domain_id: int) -> Optional[str
     r2 = await db.execute(
         select(Doorway.path, Doorway.deployed_at, Doorway.created_at).where(
             Doorway.domain_id == domain_id,
-            Doorway.status.in_(["deployed", "indexed", "draft", "paused"])
+            Doorway.status.in_(["deployed", "indexed", "draft", "paused", "optimizing"])
         )
     )
     rows = r2.all()
