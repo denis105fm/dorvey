@@ -1120,9 +1120,9 @@ export default function Doorways() {
                       {batchSslMut.isPending ? "SSL…" : "Получить SSL всем в списке"}
                     </button>
                   )}
-                  {selectedIds.length > 0 && (
+                  {selectedDoorwayIds.size > 0 && (
                     <button
-                      onClick={() => refreshSitemapMut.mutate(selectedIds)}
+                      onClick={() => refreshSitemapMut.mutate(Array.from(selectedDoorwayIds))}
                       disabled={refreshSitemapMut.isPending}
                       className="px-4 py-2 bg-sky-600/60 hover:bg-sky-600/80 disabled:opacity-50 text-white rounded-lg text-sm"
                       title="Перегенерировать и загрузить sitemap.xml для доменов выбранных дорвеев"
