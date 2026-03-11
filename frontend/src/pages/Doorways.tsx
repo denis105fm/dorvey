@@ -556,14 +556,17 @@ export default function Doorways() {
     onError: (e: { response?: { data?: { detail?: string } } }) => toast.error(e?.response?.data?.detail ?? "Ошибка"),
   });
   const refreshSitemapMut = useMutation({
-    mutationFn: (doorway_ids: number[]) => api.post("/deploy/refresh-sitemap", { doorway_ids }).then((r) => r.data as { results?: { domain: string; ok: boolean; message?: string; urls?: number }[]; ok_count?: number; total_domains?: number }),
-    onSuccess: (data: { results?: { domain: string; ok: boolean; message?: string; urls?: number }[]; ok_count?: number; total_domains?: number }) => {
+    mutationFn: (doorway_ids: number[]) => api.post("/deploy/refresh-sitemap", { doorway_ids }).then((r) => r.data as { results?: { domain: string; ok: boolean; message?: string; urls?: number; selected_count?: number }[]; ok_count?: number; total_domains?: number }),
+    onSuccess: (data: { results?: { domain: string; ok: boolean; message?: string; urls?: number; selected_count?: number }[]; ok_count?: number; total_domains?: number }) => {
       const ok = data?.ok_count ?? 0;
       const total = data?.total_domains ?? 0;
       if (ok > 0) {
         const results = data?.results ?? [];
         const totalUrls = results.filter((r) => r.ok && r.urls != null).reduce((a, r) => a + (r.urls ?? 0), 0);
-        const byDomain = results.filter((r) => r.ok && r.urls != null).map((r) => `${r.domain}: ${r.urls} URL`);
+        const byDomain = results.filter((r) => r.ok && r.urls != null).map((r) => {
+          const sel = r.selected_count != null ? ` (${r.selected_count} выбр.)` : "";
+          return `${r.domain}: ${r.urls} URL${sel}`;
+        });
         toast.success(
           byDomain.length <= 3
             ? `Sitemap: ${byDomain.join("; ")}`

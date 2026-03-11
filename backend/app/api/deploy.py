@@ -229,12 +229,14 @@ async def refresh_sitemap(
         .where(Doorway.id.in_(data.doorway_ids), Campaign.user_id == current_user.id)
     )
     rows = r.all()
-    by_domain: dict[int, tuple[str, int, object]] = {}
+    by_domain: dict[int, tuple[str, int, object, int]] = {}  # domain_id -> (name, dom_id, server, selected_count)
     for domain_id, domain_name, dom_id, server in rows:
         if domain_id not in by_domain:
-            by_domain[domain_id] = (domain_name or "", dom_id, server)
+            by_domain[domain_id] = (domain_name or "", dom_id, server, 0)
+        name, did, srv, cnt = by_domain[domain_id]
+        by_domain[domain_id] = (name, did, srv, cnt + 1)
     results = []
-    for domain_id, (domain_name, dom_id, srv) in by_domain.items():
+    for domain_id, (domain_name, dom_id, srv, selected_count) in by_domain.items():
         if getattr(srv, "auth_type", None) == "ftp":
             results.append({"domain": domain_name, "ok": False, "message": "Только для SSH-серверов"})
             continue
@@ -255,7 +257,7 @@ async def refresh_sitemap(
             robots_txt,
         )
         url_count = sitemap_xml.count("<loc>")
-        results.append({"domain": domain_name, "ok": ok, "message": msg[:150] if msg else "", "urls": url_count})
+        results.append({"domain": domain_name, "ok": ok, "message": msg[:150] if msg else "", "urls": url_count, "selected_count": selected_count})
     ok_count = sum(1 for x in results if x["ok"])
     return {"status": "ok", "results": results, "ok_count": ok_count, "total_domains": len(results)}
 
